@@ -1,0 +1,19 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+
+class Recipe(recipe.Recipe):
+
+    name = 'fluidsynth'
+    version = '1.1.6'
+    licenses = [License.LGPLv2]
+    deps = ['glib']
+    remotes = {'origin': 'https://github.com/atsushieno/fluidsynth.git'}
+    commit = '5e60a75'
+    srcdir = 'fluidsynth'
+    config_sh = './autogen.sh && CFLAGS=-DDEFAULT_SOUNDFONT=NULL ./configure'
+    files_libs = ['libfluidsynth']
+    files_lang = ['fluidsynth']
+    files_devel = [
+            'include/fluidsynth',
+            'fluidsynth.pc',
+            ]
