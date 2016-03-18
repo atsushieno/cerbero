@@ -38,8 +38,12 @@ class Architecture:
 
     @staticmethod
     def is_arm(arch):
+        '''Returns whether the architecture is an ARM based one.
+        Note that it will include 32bit *and* 64bit ARM targets. If you
+        wish to do something special for 64bit you should first check for
+        that before calling this method.'''
         return arch in [Architecture.ARM, Architecture.ARMv7,
-                Architecture.ARMv7S]
+                Architecture.ARMv7S, Architecture.ARM64]
 
 
 class Distro:
@@ -72,6 +76,7 @@ class DistroVersion:
     UBUNTU_TRUSTY = 'ubuntu_trusty'
     UBUNTU_UTOPIC = 'ubuntu_utopic'
     UBUNTU_VIVID = 'ubuntu_vivid'
+    UBUNTU_WILY = 'ubuntu_wily'
     FEDORA_16 = 'fedora_16'
     FEDORA_17 = 'fedora_17'
     FEDORA_18 = 'fedora_18'
@@ -90,6 +95,7 @@ class DistroVersion:
     WINDOWS_VISTA = 'windows_vista'
     WINDOWS_7 = 'windows_7'
     WINDOWS_8 = 'windows_8'
+    WINDOWS_10 = 'windows_10'
     OS_X_MAVERICKS = 'osx_mavericks'
     OS_X_MOUNTAIN_LION = 'osx_mountain_lion'
     OS_X_YOSEMITE = 'osx_yosemite'
@@ -105,6 +111,7 @@ class DistroVersion:
     IOS_8_4 = 'ios_8_4'
     IOS_9_0 = 'ios_9_0'
     IOS_9_1 = 'ios_9_1'
+    IOS_9_2 = 'ios_9_2'
     ANDROID_GINGERBREAD = 'android_gingerbread'  # API Level 9
     ANDROID_ICE_CREAM_SANDWICH = 'android_ice_cream_sandwich'  # API Level 14
     ANDROID_JELLY_BEAN = 'android_jelly_bean'  # API Level 16

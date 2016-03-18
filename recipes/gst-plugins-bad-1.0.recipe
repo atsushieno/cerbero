@@ -15,7 +15,7 @@ class Recipe(recipe.Recipe):
         --disable-ladspa --disable-lv2 --disable-mimic --disable-modplug \
         --disable-mpeg2enc --disable-mplex --disable-musepack --disable-mythtv \
         --disable-neon --disable-ofa --disable-openal --disable-opencv \
-        --disable-pvr --disable-sdl --disable-sndfile --disable-soundtouch \
+        --disable-pvr --disable-sdl --disable-sndfile \
         --disable-teletextdec --disable-timidity \
         --disable-vdpau --disable-voamrwbenc --disable-wildmidi \
         --disable-xvid --disable-zbar --disable-sdi --disable-qt'
@@ -38,12 +38,24 @@ class Recipe(recipe.Recipe):
     files_libs = ['libgstcodecparsers-1.0', 'libgstmpegts-1.0', 'libgsturidownloader-1.0',
                   'libgstbasecamerabinsrc-1.0', 'libgstphotography-1.0',
                   'libgstgl-1.0', 'libgstbadbase-1.0', 'libgstbadvideo-1.0',
-                  'libgstinsertbin-1.0', 'libgstadaptivedemux-1.0']
+                  'libgstinsertbin-1.0', 'libgstadaptivedemux-1.0',
+                  'libgstplayer-1.0', 'libgstbadbase-1.0',
+                  'libgstbadaudio-1.0', 'libgstbadvideo-1.0']
 
     files_plugins_devel = [
         'include/gstreamer-1.0/gst/gl',
         'lib/gstreamer-1.0/include/gst/gl',
-        'include/gstreamer-1.0/gst/mpegts'
+        'include/gstreamer-1.0/gst/mpegts',
+        'include/gstreamer-1.0/gst/player',
+        'include/gstreamer-1.0/gst/base',
+        'include/gstreamer-1.0/gst/audio',
+        'include/gstreamer-1.0/gst/video',
+        'lib/pkgconfig/gstreamer-gl-1.0.pc',
+        'lib/pkgconfig/gstreamer-mpegts-1.0.pc',
+        'lib/pkgconfig/gstreamer-player-1.0.pc',
+        'lib/pkgconfig/gstreamer-bad-base-1.0.pc',
+        'lib/pkgconfig/gstreamer-bad-audio-1.0.pc',
+        'lib/pkgconfig/gstreamer-bad-video-1.0.pc'
     ]
 
     files_plugins_effects = [
@@ -67,6 +79,7 @@ class Recipe(recipe.Recipe):
              'lib/gstreamer-1.0/libgstsegmentclip%(mext)s',
              'lib/gstreamer-1.0/libgstsmooth%(mext)s',
              'lib/gstreamer-1.0/libgstspeed%(mext)s',
+             'lib/gstreamer-1.0/libgstsoundtouch%(mext)s',
              'lib/gstreamer-1.0/libgstvideofiltersbad%(mext)s',
              'lib/gstreamer-1.0/libgstaudiomixer%(mext)s',
              'lib/gstreamer-1.0/libgstcompositor%(mext)s',
@@ -78,13 +91,13 @@ class Recipe(recipe.Recipe):
              'lib/gstreamer-1.0/libgstdashdemux%(mext)s',
              'lib/gstreamer-1.0/libgstdvbsuboverlay%(mext)s',
              'lib/gstreamer-1.0/libgstdvdspu%(mext)s',
-             'lib/gstreamer-1.0/libgstfragmented%(mext)s',
+             'lib/gstreamer-1.0/libgsthls%(mext)s',
              'lib/gstreamer-1.0/libgstid3tag%(mext)s',
              'lib/gstreamer-1.0/libgstkate%(mext)s',
              'lib/gstreamer-1.0/libgstmidi%(mext)s',
              'lib/gstreamer-1.0/libgstmxf%(mext)s',
              'lib/gstreamer-1.0/libgstopenh264%(mext)s',
-             'lib/gstreamer-1.0/libgstopus%(mext)s',
+             'lib/gstreamer-1.0/libgstopusparse%(mext)s',
              'lib/gstreamer-1.0/libgstpcapparse%(mext)s',
              'lib/gstreamer-1.0/libgstpnm%(mext)s',
              'lib/gstreamer-1.0/libgstrfbsrc%(mext)s',
@@ -189,7 +202,8 @@ class Recipe(recipe.Recipe):
     files_typelibs = [
         'GstGL-1.0',
         'GstInsertBin-1.0',
-        'GstMpegts-1.0'
+        'GstMpegts-1.0',
+        'GstPlayer-1.0'
         ]
 
     files_plugins_sys  = []

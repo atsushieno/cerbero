@@ -93,7 +93,7 @@ class Config (object):
                    'recipes_remotes', 'ios_platform', 'extra_build_tools',
                    'distro_packages_install', 'interactive',
                    'target_arch_flags', 'sysroot', 'isysroot',
-                   'extra_lib_path', 'cached_sources']
+                   'extra_lib_path', 'cached_sources', 'tools_prefix']
 
     def __init__(self):
         self._check_uninstalled()
@@ -330,7 +330,7 @@ class Config (object):
 
     def set_property(self, name, value, force=False):
         if name not in self._properties:
-            raise ConfigurationError('Unkown key %s' % name)
+            raise ConfigurationError('Unknown key %s' % name)
         if force or getattr(self, name) is None:
             setattr(self, name, value)
 
@@ -441,7 +441,6 @@ class Config (object):
 
                 if os.path.exists(f):
                     self._parse(f, reset=False)
-                    self.filename = DEFAULT_CONFIG_FILE
                 else:
                     raise ConfigurationError(_("Configuration file %s doesn't "
                                                "exists") % f)
