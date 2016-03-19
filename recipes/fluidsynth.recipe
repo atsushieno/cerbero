@@ -8,7 +8,8 @@ class Recipe(recipe.Recipe):
     licenses = [License.LGPLv2]
     deps = ['glib']
     remotes = {'origin': 'https://github.com/atsushieno/fluidsynth.git'}
-    commit = '5fba0dd'
+    branch = 'master'
+    commit = 'b5d29de'
     srcdir = 'fluidsynth'
     config_sh = './autogen.sh && CFLAGS=-DDEFAULT_SOUNDFONT=NULL ./configure'
     files_libs = ['libfluidsynth']
