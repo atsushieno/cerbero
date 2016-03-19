@@ -9,7 +9,7 @@ class Recipe(recipe.Recipe):
     deps = ['glib']
     remotes = {'origin': 'https://github.com/atsushieno/fluidsynth.git'}
     branch = 'master'
-    commit = 'b5d29de'
+    commit = '59fa157'
     srcdir = 'fluidsynth'
     config_sh = './autogen.sh && CFLAGS=-DDEFAULT_SOUNDFONT=NULL ./configure'
     files_libs = ['libfluidsynth']
