@@ -29,6 +29,8 @@ from cerbero.utils import messages as m
 
 CONFIG_DIR = os.path.expanduser('~/.cerbero')
 CONFIG_EXT = 'cbc'
+DEFAULT_HOME = os.path.expanduser('~/cerbero')
+DEFAULT_CONFIG_ENVIRON = 'CERBERO_LOCAL_CONFIG'
 DEFAULT_CONFIG_FILENAME = 'cerbero.%s' % CONFIG_EXT
 DEFAULT_CONFIG_FILE = os.path.join(CONFIG_DIR, DEFAULT_CONFIG_FILENAME)
 DEFAULT_GIT_ROOT = 'git://anongit.freedesktop.org/gstreamer'
@@ -419,7 +421,12 @@ class Config (object):
         return "%s%s%s" % (path1, separator, path2)
 
     def _load_main_config(self):
-        if os.path.exists(DEFAULT_CONFIG_FILE):
+        if os.environ[DEFAULT_CONFIG_ENVIRON]:
+            msg = _('Using configuration %s') % \
+                os.environ[DEFAULT_CONFIG_ENVIRON]
+            m.warning(msg)
+            self._parse(os.environ[DEFAULT_CONFIG_ENVIRON])
+        elif os.path.exists(DEFAULT_CONFIG_FILE):
             self._parse(DEFAULT_CONFIG_FILE)
         else:
             msg = _('Using default configuration because %s is missing') % \
