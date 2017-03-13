@@ -14,7 +14,7 @@ intltool-m4		|  0.40.6	|
 libiconv		|  1.14		|
 gnustl			| ????
 libffi			|  3.2.1	| 
-zlib			|  1.2.11	|
+zlib			|  1.2.8	|
 glib			|  2.42.1	| 
 gtk-doc(-lite)		|  1.21		|
 libxml2			|  2.9.2	|
