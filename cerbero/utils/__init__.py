@@ -161,6 +161,8 @@ def system_info():
                 distro_version = DistroVersion.UBUNTU_WILY
             elif d[2] in ['xenial']:
                 distro_version = DistroVersion.UBUNTU_XENIAL
+            elif d[2] in ['yakkety']:
+                distro_version = DistroVersion.UBUNTU_YAKKETY
             elif d[1].startswith('6.'):
                 distro_version = DistroVersion.DEBIAN_SQUEEZE
             elif d[1].startswith('7.') or d[1].startswith('wheezy'):
@@ -235,7 +237,9 @@ def system_info():
     elif platform == Platform.DARWIN:
         distro = Distro.OS_X
         ver = pplatform.mac_ver()[0]
-        if ver.startswith('10.11'):
+        if ver.startswith('10.12'):
+            distro_version = DistroVersion.MAC_OS_SIERRA
+        elif ver.startswith('10.11'):
             distro_version = DistroVersion.OS_X_EL_CAPITAN
         elif ver.startswith('10.10'):
             distro_version = DistroVersion.OS_X_YOSEMITE
