@@ -192,6 +192,8 @@ def system_info():
                 distro_version = DistroVersion.UBUNTU_WILY
             elif d[2] in ['xenial']:
                 distro_version = DistroVersion.UBUNTU_XENIAL
+            elif d[2] in ['zesty']:
+                distro_version = DistroVersion.UBUNTU_ZESTY
             elif d[1].startswith('6.'):
                 distro_version = DistroVersion.DEBIAN_SQUEEZE
             elif d[1].startswith('7.') or d[1].startswith('wheezy'):
