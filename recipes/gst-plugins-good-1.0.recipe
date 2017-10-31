@@ -4,10 +4,10 @@
 class Recipe(custom.GStreamer):
     name = 'gst-plugins-good-1.0'
     config_sh = 'sh ./autogen.sh --noconfigure && ./configure'
-    configure_options = '--enable-static --disable-examples --disable-oss4 --disable-oss --disable-dv1394 --disable-aalib --disable-libcaca --disable-jack --disable-shout2 '
+    configure_options = '--enable-static --disable-examples --disable-oss4 --disable-oss --disable-dv1394 --disable-aalib --disable-libcaca --disable-jack --disable-shout2 --disable-twolame '
     remotes = {'origin': 'git://anongit.freedesktop.org/gstreamer/gst-plugins-good'}
     deps = ['gstreamer-1.0', 'gst-plugins-base-1.0', 'libjpeg-turbo', 'libpng',
-            'speex', 'gdk-pixbuf', 'libsoup',
+            'speex', 'gdk-pixbuf', 'libsoup', 'mpg123', 'lame',
             'orc', 'wavpack', 'flac', 'taglib', 'bzip2', 'zlib',
             'libvpx', 'libdv', 'cairo']
 
@@ -88,7 +88,9 @@ class Recipe(custom.GStreamer):
              'lib/gstreamer-1.0/libgstid3demux%(mext)s',
              'lib/gstreamer-1.0/libgstisomp4%(mext)s',
              'lib/gstreamer-1.0/libgstjpeg%(mext)s',
+             'lib/gstreamer-1.0/libgstlame%(mext)s',
              'lib/gstreamer-1.0/libgstmatroska%(mext)s',
+             'lib/gstreamer-1.0/libgstmpg123%(mext)s',
              'lib/gstreamer-1.0/libgstmulaw%(mext)s',
              'lib/gstreamer-1.0/libgstmultipart%(mext)s',
              'lib/gstreamer-1.0/libgstpng%(mext)s',
@@ -115,7 +117,9 @@ class Recipe(custom.GStreamer):
              'lib/gstreamer-1.0/libgstid3demux.a', 'lib/gstreamer-1.0/libgstid3demux.la',
              'lib/gstreamer-1.0/libgstisomp4.a', 'lib/gstreamer-1.0/libgstisomp4.la',
              'lib/gstreamer-1.0/libgstjpeg.a', 'lib/gstreamer-1.0/libgstjpeg.la',
+             'lib/gstreamer-1.0/libgstlame.a', 'lib/gstreamer-1.0/libgstlame.la',
              'lib/gstreamer-1.0/libgstmatroska.a', 'lib/gstreamer-1.0/libgstmatroska.la',
+             'lib/gstreamer-1.0/libgstmpg123.a', 'lib/gstreamer-1.0/libgstmpg123.la',
              'lib/gstreamer-1.0/libgstmulaw.a', 'lib/gstreamer-1.0/libgstmulaw.la',
              'lib/gstreamer-1.0/libgstmultipart.a', 'lib/gstreamer-1.0/libgstmultipart.la',
              'lib/gstreamer-1.0/libgstpng.a', 'lib/gstreamer-1.0/libgstpng.la',
@@ -162,11 +166,11 @@ class Recipe(custom.GStreamer):
 
     platform_files_plugins_sys = {
         Platform.WINDOWS: [
-             'lib/gstreamer-1.0/libgstdirectsoundsink%(mext)s',
+             'lib/gstreamer-1.0/libgstdirectsound%(mext)s',
             ],
         Platform.DARWIN: [
              'lib/gstreamer-1.0/libgstosxaudio%(mext)s',
-             'lib/gstreamer-1.0/libgstosxvideosink%(mext)s',
+             'lib/gstreamer-1.0/libgstosxvideo%(mext)s',
             ],
         Platform.IOS: [
              'lib/gstreamer-1.0/libgstosxaudio%(mext)s'
@@ -175,11 +179,11 @@ class Recipe(custom.GStreamer):
 
     platform_files_plugins_sys_devel = {
         Platform.WINDOWS: [
-             'lib/gstreamer-1.0/libgstdirectsoundsink.a', 'lib/gstreamer-1.0/libgstdirectsoundsink.la',
+             'lib/gstreamer-1.0/libgstdirectsound.a', 'lib/gstreamer-1.0/libgstdirectsound.la',
             ],
         Platform.DARWIN: [
              'lib/gstreamer-1.0/libgstosxaudio.a', 'lib/gstreamer-1.0/libgstosxaudio.la',
-             'lib/gstreamer-1.0/libgstosxvideosink.a', 'lib/gstreamer-1.0/libgstosxvideosink.la',
+             'lib/gstreamer-1.0/libgstosxvideo.a', 'lib/gstreamer-1.0/libgstosxvideo.la',
             ],
         Platform.IOS: [
              'lib/gstreamer-1.0/libgstosxaudio.a', 'lib/gstreamer-1.0/libgstosxaudio.la',

@@ -163,6 +163,15 @@ def system_info():
                 with open('/etc/os-release', 'r') as f:
                     if 'ID="amzn"\n' in f.readlines():
                         d = ('RedHat', 'amazon', '')
+                    else:
+                        f.seek(0, 0)
+                        for line in f:
+                            k,v = line.rstrip().split("=")
+                            if k == 'NAME':
+                                name = v.strip('"')
+                            elif k == 'VERSION_ID':
+                                version = v.strip('"')
+                        d = (name, version, '');
 
         if d[0] in ['Ubuntu', 'debian', 'LinuxMint']:
             distro = Distro.DEBIAN
@@ -190,7 +199,7 @@ def system_info():
                 distro_version = DistroVersion.UBUNTU_VIVID
             elif d[2] in ['wily']:
                 distro_version = DistroVersion.UBUNTU_WILY
-            elif d[2] in ['xenial']:
+            elif d[2] in ['xenial', 'sarah']:
                 distro_version = DistroVersion.UBUNTU_XENIAL
             elif d[2] in ['zesty']:
                 distro_version = DistroVersion.UBUNTU_ZESTY
@@ -202,6 +211,8 @@ def system_info():
                 distro_version = DistroVersion.DEBIAN_JESSIE
             elif d[1].startswith('9.') or d[1].startswith('stretch'):
                 distro_version = DistroVersion.DEBIAN_STRETCH
+            elif d[1].startswith('10.') or d[1].startswith('buster'):
+                distro_version = DistroVersion.DEBIAN_BUSTER
             else:
                 raise FatalError("Distribution '%s' not supported" % str(d))
         elif d[0] in ['RedHat', 'Fedora', 'CentOS', 'Red Hat Enterprise Linux Server', 'CentOS Linux']:
@@ -239,16 +250,17 @@ def system_info():
                 raise FatalError("Distribution '%s' not supported" % str(d))
         elif d[0].strip() in ['openSUSE']:
             distro = Distro.SUSE
-            if d[1] == '12.1':
-                distro_version = DistroVersion.OPENSUSE_12_1
-            elif d[1] == '12.2':
-                distro_version = DistroVersion.OPENSUSE_12_2
-            elif d[1] == '12.3':
-                distro_version = DistroVersion.OPENSUSE_12_3
+            if d[1] == '42.2':
+                distro_version = DistroVersion.OPENSUSE_42_2
+            elif d[1] == '42.3':
+                distro_version = DistroVersion.OPENSUSE_42_3
             else:
                 # FIXME Fill this
                 raise FatalError("Distribution OpenSuse '%s' "
                                  "not supported" % str(d))
+        elif d[0].strip() in ['openSUSE Tumbleweed']:
+            distro = Distro.SUSE
+            distro_version = DistroVersion.OPENSUSE_TUMBLEWEED
         elif d[0].strip() in ['arch']:
             distro = Distro.ARCH
             distro_version = DistroVersion.ARCH_ROLLING
@@ -364,7 +376,7 @@ def add_system_libs(config, new_env):
     if arch == Architecture.X86:
         arch = 'i386'
     elif arch == Architecture.X86_64:
-        if config.distro == Distro.REDHAT:
+        if config.distro == Distro.REDHAT or config.distro == Distro.SUSE:
             libdir = 'lib64'
 
     sysroot = '/'
