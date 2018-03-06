@@ -4,13 +4,13 @@
 class Recipe(recipe.Recipe):
 
     name = 'fluidsynth'
-    version = '1.1.6'
+    version = '1.2.0'
     licenses = [License.LGPLv2]
+    btype = BuildType.CMAKE
     deps = ['glib']
-    remotes = {'origin': 'https://github.com/atsushieno/fluidsynth.git'}
-    commit = '5fba0dd'
-    srcdir = 'fluidsynth'
-    config_sh = './autogen.sh && CFLAGS=-DDEFAULT_SOUNDFONT=NULL ./configure'
+    remotes = {'origin': 'https://github.com/atsushieno/fluidsynth-fork.git'}
+    commit = '819185e'
+    config_sh = 'cmake -DCMAKE_TOOLCHAIN_FILE=~/android-ndk-r15b/build/cmake/android.toolchain.cmake -Denable-pkgconfig=0 -Denable-readline=0 -Denable-oss=0 -Denable-opensles=1 -DDEFAULT_SOUNDFONT=NULL'
     files_libs = ['libfluidsynth']
     files_lang = ['fluidsynth']
     files_devel = [
