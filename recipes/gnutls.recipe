@@ -5,7 +5,7 @@ from cerbero.utils import needs_xcode8_sdk_workaround
 
 class Recipe(recipe.Recipe):
     name = 'gnutls'
-    version = '3.5.15'
+    version = '3.5.18'
     maj_ver = '.'.join(version.split('.')[0:2])
     url = 'https://www.gnupg.org/ftp/gcrypt/{0}/v{1}/{0}-{2}.tar.xz'.format(name, maj_ver, version)
     stype = SourceType.TARBALL
@@ -24,7 +24,8 @@ class Recipe(recipe.Recipe):
         Platform.DARWIN: ['bionic-fixup']
     }
     patches = [name + "/0003-Disable-ncrypt-support.patch",
-               name + "/0001-Undefine-__USE_MINGW_ANSI_STDIO-as-otherwise-stdio.h.patch"]
+               name + "/0001-Undefine-__USE_MINGW_ANSI_STDIO-as-otherwise-stdio.h.patch",
+               name + "/0001-pgusage-remove-system-call.patch",]
     autoreconf = True
 
     files_libs = ['libgnutls', 'libgnutlsxx']
@@ -44,6 +45,15 @@ class Recipe(recipe.Recipe):
             self.configure_options += ' --disable-hardware-acceleration'
         if self.config.target_platform == Platform.ANDROID:
             self.configure_options += ' --disable-cxx'
+            # Fix build with NDK 16
+            self.append_env['ac_cv_header_stdatomic_h'] = 'no'
+            v = DistroVersion.get_android_api_version(self.config.target_distro_version)
+            if self.config.target_arch in [Architecture.ARM, Architecture.ARMv7, Architecture.X86] and v < 21:
+                # FIXME: HACK to make projects compile with NDK 16
+                # we fail to compile with -D_FILE_OFFSET_BITS=64
+                # because we don't use clang and we use a platform < 21 (Lollipop)
+                # See $NDK_ROOT/sysroot/usr/include/sys/mman.h as one example
+                self.new_env['ac_cv_func_mmap'] = 'no'
         if self.config.target_platform == Platform.IOS:
             if self.config.target_arch == Architecture.ARM64:
                 self.configure_options += ' --disable-hardware-acceleration'

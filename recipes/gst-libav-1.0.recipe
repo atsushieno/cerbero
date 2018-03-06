@@ -43,9 +43,12 @@ class Recipe(custom.GStreamer):
                 asflags = ' -arch i386 -m32'
             self.configure_options += ' ASFLAGS="%s"' % asflags
         elif self.config.target_platform == Platform.ANDROID:
+            # This creates too much problems and we can do without it
+            libavextraconf = " --disable-linux-perf"
             if self.config.target_arch == Architecture.X86:
               # libav internally aligns stacks, while Android doesn't
-              self.configure_options += ' --with-libav-extra-configure="--extra-cflags=\'-mincoming-stack-boundary=4\'"'
+                libavextraconf += " --extra-cflags=\'-mincoming-stack-boundary=4\'"
+            self.configure_options += ' --with-libav-extra-configure="%s"' % libavextraconf
         elif self.config.target_platform == Platform.IOS:
             if Architecture.is_arm(self.config.target_arch):
                 if 'GAS' in os.environ:
@@ -63,21 +66,26 @@ class Recipe(custom.GStreamer):
         if self.config.target_platform == Platform.WINDOWS:
             replacements = {'RANLIB=ranlib': 'RANLIB=%s' % os.environ['RANLIB'],
                             'RANLIB=%s-ranlib' % self.config.host: 'RANLIB=%s' % os.environ['RANLIB']}    
-            shell.replace(os.path.join(libav_path, 'config.mak'), replacements)
+            shell.replace(os.path.join(libav_path, 'ffbuild', 'config.mak'), replacements)
         elif self.config.target_platform in [Platform.DARWIN, Platform.IOS]:
             if self.config.target_arch == Architecture.X86:
                 replacements = {'HAVE_EBX_AVAILABLE=yes': 'HAVE_EBX_AVAILABLE=no',
                                 'HAVE_EBX_AVAILABLE 1': 'HAVE_EBX_AVAILABLE 0',}
-                shell.replace(os.path.join(libav_path, 'config.mak'), replacements)
+                shell.replace(os.path.join(libav_path, 'ffbuild', 'config.mak'), replacements)
                 shell.replace(os.path.join(libav_path, 'config.h'), replacements)
             if self.config.target_platform == Platform.IOS:
                 replacements = {'RANLIB=ranlib': 'RANLIB=%s' % os.environ['RANLIB'],
                                 'RANLIB=%s-ranlib' % self.config.host: 'RANLIB=%s' % os.environ['RANLIB']}    
-                shell.replace(os.path.join(libav_path, 'config.mak'), replacements)
+                shell.replace(os.path.join(libav_path, 'ffbuild', 'config.mak'), replacements)
         # log2 and log2f are not provided by bionic, but they are not checked
         # properly
         elif self.config.target_platform == Platform.ANDROID:
                 replacements = {'HAVE_LOG2 1': 'HAVE_LOG2 0',
                                 'HAVE_LOG2F 1': 'HAVE_LOG2F 0',}
                 shell.replace(os.path.join(libav_path, 'config.h'), replacements)
+
+                v = DistroVersion.get_android_api_version(self.config.target_distro_version)
+                if self.config.target_arch in [Architecture.ARM, Architecture.ARMv7, Architecture.X86] and v < 21:
+                        replacements = {'-D_FILE_OFFSET_BITS=64': '',}
+                        shell.replace(os.path.join(libav_path, 'ffbuild', 'config.mak'), replacements)
 

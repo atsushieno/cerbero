@@ -65,9 +65,11 @@ G_IO_MODULES_PATH := $(GSTREAMER_ROOT)/lib/gio/modules/static
 ifeq ($(HOST_OS),windows)
     SED := $(GSTREAMER_NDK_BUILD_PATH)/tools/windows/sed
     SED_LOCAL := "$(GSTREAMER_NDK_BUILD_PATH)/tools/windows/sed"
+    EXE_SUFFIX := .exe
 else
     SED := sed
     SED_LOCAL := sed
+    EXE_SUFFIX :=
 endif
 
 ifndef GSTREAMER_ANDROID_MODULE_NAME
@@ -79,7 +81,7 @@ GSTREAMER_ANDROID_SO          := $(GSTREAMER_BUILD_DIR)/lib$(GSTREAMER_ANDROID_M
 GSTREAMER_ANDROID_C           := $(GSTREAMER_BUILD_DIR)/$(GSTREAMER_ANDROID_MODULE_NAME).c
 GSTREAMER_ANDROID_C_IN        := $(GSTREAMER_NDK_BUILD_PATH)/gstreamer_android-1.0.c.in
 GSTREAMER_DEPS                := $(GSTREAMER_EXTRA_DEPS) gstreamer-1.0
-GSTREAMER_LD                  := -fuse-ld=gold -Wl,-soname,lib$(GSTREAMER_ANDROID_MODULE_NAME).so
+GSTREAMER_LD                  := -fuse-ld=gold$(EXE_SUFFIX) -Wl,-soname,lib$(GSTREAMER_ANDROID_MODULE_NAME).so
 
 ################################
 #  NDK Build Prebuilt library  #
@@ -156,14 +158,24 @@ GSTREAMER_ANDROID_CFLAGS     := $(call pkg-config-get-includes,$(GSTREAMER_DEPS)
 # In newer NDK, SYSROOT is replaced by SYSROOT_INC and SYSROOT_LINK, which
 # now points to the root directory. But this will probably change in the future from:
 # https://android.googlesource.com/platform/ndk/+/fa8c1b4338c1bef2813ecee0ee298e9498a1aaa7
-ifndef SYSROOT
-    SYSROOT_GST := $(NDK_PLATFORMS_ROOT)/$(TARGET_PLATFORM)/arch-$(TARGET_ARCH)
+ifdef SYSROOT
+    SYSROOT_GST_INC := $(SYSROOT)
+    SYSROOT_GST_LINK := $(SYSROOT)
 else
-    SYSROOT_GST := $(SYSROOT)
+    ifdef SYSROOT_INC
+        $(call assert-defined, SYSROOT_LINK)
+        ifdef SYSROOT_LINK
+            SYSROOT_GST_INC := $(SYSROOT_INC)
+            SYSROOT_GST_LINK := $(SYSROOT_LINK)
+        endif
+    else
+        SYSROOT_GST_INC := $(NDK_PLATFORMS_ROOT)/$(TARGET_PLATFORM)/arch-$(TARGET_ARCH)
+        SYSROOT_GST_LINK := $(SYSROOT_GST_INC)
+    endif
 endif
 
 # Create the link command
-GSTREAMER_ANDROID_CMD        := $(call libtool-link,$(TARGET_CC) $(TARGET_LDFLAGS) -shared --sysroot=$(SYSROOT_GST) \
+GSTREAMER_ANDROID_CMD        := $(call libtool-link,$(TARGET_CC) $(TARGET_LDFLAGS) -shared --sysroot=$(SYSROOT_GST_LINK) \
 	-o $(GSTREAMER_ANDROID_SO) $(GSTREAMER_ANDROID_O) \
 	-L$(GSTREAMER_ROOT)/lib -L$(GSTREAMER_STATIC_PLUGINS_PATH) $(G_IO_MODULES_PATH) \
 	$(GSTREAMER_ANDROID_LIBS), $(GSTREAMER_LD)) -Wl,-no-undefined $(GSTREAMER_LD)
@@ -181,11 +193,12 @@ endif
 
 delsharedlib_$(TARGET_ARCH_ABI): PRIV_B_DIR := $(GSTREAMER_BUILD_DIR)
 delsharedlib_$(TARGET_ARCH_ABI):
-	@$(call host-rm,$(prebuilt))
-	@$(foreach path,$(wildcard $(PRIV_B_DIR)/sed*), $(call host-rm,$(path)) && ) echo Done rm
+	$(hide)$(call host-rm,$(prebuilt))
+	$(hide)$(foreach path,$(wildcard $(PRIV_B_DIR)/sed*), $(call host-rm,$(path)) && ) echo Done rm
 $(LOCAL_INSTALLED): delsharedlib_$(TARGET_ARCH_ABI)
 
 # Generates a source file that declares and registers all the required plugins
+# about the sed command, android-studio doesn't seem to like line continuation characters when executing shell commands
 genstatic_$(TARGET_ARCH_ABI): PRIV_C := $(GSTREAMER_ANDROID_C)
 genstatic_$(TARGET_ARCH_ABI): PRIV_B_DIR := $(GSTREAMER_BUILD_DIR)
 genstatic_$(TARGET_ARCH_ABI): PRIV_C_IN := $(GSTREAMER_ANDROID_C_IN)
@@ -194,28 +207,25 @@ genstatic_$(TARGET_ARCH_ABI): PRIV_P_R := $(GSTREAMER_PLUGINS_REGISTER)
 genstatic_$(TARGET_ARCH_ABI): PRIV_G_L := $(G_IO_MODULES_LOAD)
 genstatic_$(TARGET_ARCH_ABI): PRIV_G_R := $(G_IO_MODULES_DECLARE)
 genstatic_$(TARGET_ARCH_ABI):
-	@$(HOST_ECHO) "GStreamer      : [GEN] => $(PRIV_C)"
-	@$(call host-mkdir,$(PRIV_B_DIR))
-	@$(SED_LOCAL) "s/@PLUGINS_DECLARATION@/$(PRIV_P_D)/g" $(PRIV_C_IN) | \
-		$(SED_LOCAL) "s/@PLUGINS_REGISTRATION@/$(PRIV_P_R)/g" | \
-		$(SED_LOCAL) "s/@G_IO_MODULES_LOAD@/$(PRIV_G_L)/g" | \
-		$(SED_LOCAL) "s/@G_IO_MODULES_DECLARE@/$(PRIV_G_R)/g" > $(PRIV_C)
+	$(hide)$(HOST_ECHO) "GStreamer      : [GEN] => $(PRIV_C)"
+	$(hide)$(call host-mkdir,$(PRIV_B_DIR))
+	$(hide)$(SED_LOCAL) "s/@PLUGINS_DECLARATION@/$(PRIV_P_D)/g" $(PRIV_C_IN) | $(SED_LOCAL) "s/@PLUGINS_REGISTRATION@/$(PRIV_P_R)/g" | $(SED_LOCAL) "s/@G_IO_MODULES_LOAD@/$(PRIV_G_L)/g" | $(SED_LOCAL) "s/@G_IO_MODULES_DECLARE@/$(PRIV_G_R)/g" > $(PRIV_C)
 
 # Compile the source file
 $(GSTREAMER_ANDROID_O): PRIV_C := $(GSTREAMER_ANDROID_C)
-$(GSTREAMER_ANDROID_O): PRIV_CC_CMD := $(TARGET_CC) --sysroot=$(SYSROOT_GST) $(TARGET_CFLAGS) \
+$(GSTREAMER_ANDROID_O): PRIV_CC_CMD := $(TARGET_CC) --sysroot=$(SYSROOT_GST_INC) $(SYSROOT_ARCH_INC_ARG) $(TARGET_CFLAGS) \
 	-c $(GSTREAMER_ANDROID_C) -Wall -Werror -o $(GSTREAMER_ANDROID_O) $(GSTREAMER_ANDROID_CFLAGS)
 $(GSTREAMER_ANDROID_O): PRIV_GST_CFLAGS := $(GSTREAMER_ANDROID_CFLAGS) $(TARGET_CFLAGS)
 $(GSTREAMER_ANDROID_O): genstatic_$(TARGET_ARCH_ABI)
-	@$(HOST_ECHO) "GStreamer      : [COMPILE] => $(PRIV_C)"
-	@$(PRIV_CC_CMD)
+	$(hide)$(HOST_ECHO) "GStreamer      : [COMPILE] => $(PRIV_C)"
+	$(hide)$(PRIV_CC_CMD)
 
 # Creates a shared library including gstreamer, its plugins and all the dependencies
 buildsharedlibrary_$(TARGET_ARCH_ABI): PRIV_CMD := $(GSTREAMER_ANDROID_CMD)
 buildsharedlibrary_$(TARGET_ARCH_ABI): PRIV_SO := $(GSTREAMER_ANDROID_SO)
 buildsharedlibrary_$(TARGET_ARCH_ABI): $(GSTREAMER_ANDROID_O)
-	@$(HOST_ECHO) "GStreamer      : [LINK] => $(PRIV_SO)"
-	@$(PRIV_CMD)
+	$(hide)$(HOST_ECHO) "GStreamer      : [LINK] => $(PRIV_SO)"
+	$(hide)$(PRIV_CMD)
 
 ifeq ($(GSTREAMER_INCLUDE_FONTS),yes)
 GSTREAMER_INCLUDE_FONTS_SUBST :=
@@ -235,28 +245,25 @@ else
 GSTREAMER_COPY_FILE_SUBST := //
 endif
 
+# about the sed command, android-studio doesn't seem to like line continuation characters when executing shell commands
 copyjavasource_$(TARGET_ARCH_ABI):
-	@$(call host-mkdir,$(GSTREAMER_JAVA_SRC_DIR)/org/freedesktop/gstreamer)
-	@$(foreach plugin,$(GSTREAMER_PLUGINS_WITH_CLASSES), \
+	$(hide)$(call host-mkdir,$(GSTREAMER_JAVA_SRC_DIR)/org/freedesktop/gstreamer)
+	$(hide)$(foreach plugin,$(GSTREAMER_PLUGINS_WITH_CLASSES), \
 		$(call host-mkdir,$(GSTREAMER_JAVA_SRC_DIR)/org/freedesktop/gstreamer/$(plugin)) && ) echo Done mkdir
-	@$(foreach file,$(GSTREAMER_PLUGINS_CLASSES), \
+	$(hide)$(foreach file,$(GSTREAMER_PLUGINS_CLASSES), \
 		$(call host-cp,$(GSTREAMER_NDK_BUILD_PATH)$(file),$(GSTREAMER_JAVA_SRC_DIR)/org/freedesktop/gstreamer/$(file)) && ) echo Done cp
-
-	@$(SED_LOCAL) "s;@INCLUDE_FONTS@;$(GSTREAMER_INCLUDE_FONTS_SUBST);g" $(GSTREAMER_NDK_BUILD_PATH)/GStreamer.java | \
-		$(SED_LOCAL) "s;@INCLUDE_CA_CERTIFICATES@;$(GSTREAMER_INCLUDE_CA_CERTIFICATES_SUBST);g" | \
-		$(SED_LOCAL) "s;@INCLUDE_COPY_FILE@;$(GSTREAMER_COPY_FILE_SUBST);g" \
-		> $(GSTREAMER_JAVA_SRC_DIR)/org/freedesktop/gstreamer/GStreamer.java
+	$(hide)$(SED_LOCAL) "s;@INCLUDE_FONTS@;$(GSTREAMER_INCLUDE_FONTS_SUBST);g" $(GSTREAMER_NDK_BUILD_PATH)/GStreamer.java | $(SED_LOCAL) "s;@INCLUDE_CA_CERTIFICATES@;$(GSTREAMER_INCLUDE_CA_CERTIFICATES_SUBST);g" | $(SED_LOCAL) "s;@INCLUDE_COPY_FILE@;$(GSTREAMER_COPY_FILE_SUBST);g" > $(GSTREAMER_JAVA_SRC_DIR)/org/freedesktop/gstreamer/GStreamer.java
 
 ifndef GSTREAMER_ASSETS_DIR
 GSTREAMER_ASSETS_DIR := src/main/assets
 endif
 
 copyfontsres_$(TARGET_ARCH_ABI):
-	@$(call host-mkdir,$(GSTREAMER_ASSETS_DIR)/fontconfig)
-	@$(call host-mkdir,$(GSTREAMER_ASSETS_DIR)/fontconfig/fonts/truetype/)
-	@$(call host-cp,$(GSTREAMER_NDK_BUILD_PATH)/fontconfig/fonts.conf,$(GSTREAMER_ASSETS_DIR)/fontconfig)
-	@$(call host-cp,$(GSTREAMER_NDK_BUILD_PATH)/fontconfig/fonts/Ubuntu-R.ttf,$(GSTREAMER_ASSETS_DIR)/fontconfig/fonts/truetype)
+	$(hide)$(call host-mkdir,$(GSTREAMER_ASSETS_DIR)/fontconfig)
+	$(hide)$(call host-mkdir,$(GSTREAMER_ASSETS_DIR)/fontconfig/fonts/truetype/)
+	$(hide)$(call host-cp,$(GSTREAMER_NDK_BUILD_PATH)/fontconfig/fonts.conf,$(GSTREAMER_ASSETS_DIR)/fontconfig)
+	$(hide)$(call host-cp,$(GSTREAMER_NDK_BUILD_PATH)/fontconfig/fonts/Ubuntu-R.ttf,$(GSTREAMER_ASSETS_DIR)/fontconfig/fonts/truetype)
 copycacertificatesres_$(TARGET_ARCH_ABI):
-	@$(call host-mkdir,$(GSTREAMER_ASSETS_DIR)/ssl/certs)
-	@$(call host-cp,$(GSTREAMER_ROOT)/etc/ssl/certs/ca-certificates.crt,$(GSTREAMER_ASSETS_DIR)/ssl/certs)
+	$(hide)$(call host-mkdir,$(GSTREAMER_ASSETS_DIR)/ssl/certs)
+	$(hide)$(call host-cp,$(GSTREAMER_ROOT)/etc/ssl/certs/ca-certificates.crt,$(GSTREAMER_ASSETS_DIR)/ssl/certs)
 

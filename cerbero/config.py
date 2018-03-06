@@ -34,7 +34,7 @@ DEFAULT_CONFIG_ENVIRON = 'CERBERO_LOCAL_CONFIG'
 DEFAULT_CONFIG_FILENAME = 'cerbero.%s' % CONFIG_EXT
 DEFAULT_CONFIG_FILE = os.path.join(CONFIG_DIR, DEFAULT_CONFIG_FILENAME)
 DEFAULT_GIT_ROOT = 'git://anongit.freedesktop.org/gstreamer'
-DEFAULT_ALLOW_PARALLEL_BUILD = False
+DEFAULT_ALLOW_PARALLEL_BUILD = True
 DEFAULT_PACKAGER = "Default <default@change.me>"
 CERBERO_UNINSTALLED = 'CERBERO_UNINSTALLED'
 CERBERO_PREFIX = 'CERBERO_PREFIX'
@@ -140,6 +140,10 @@ class Config (object):
                 # config again in the universal config.
                 for arch, config_file in self.universal_archs.items():
                     arch_config[arch] = self._copy(arch)
+                    # Allow the config to detect whether this config is
+                    # running under a universal setup and some
+                    # paths/configuration need to change
+                    arch_config[arch].variants += ['universal']
                     if config_file is not None:
                         # This works because the override config files are
                         # fairly light. Things break if they are more complex
@@ -371,7 +375,13 @@ class Config (object):
 
     def recipe_remotes(self, recipe_name):
         if recipe_name in self.recipes_remotes:
-            return self.recipes_remotes[recipe_name]
+            rrs = self.recipes_remotes[recipe_name]
+            if not isinstance(rrs, dict):
+                raise ConfigurationError('recipes_remotes value for recipe %s '
+                                         'must be a dict in the form '
+                                         '{ \'remote-name\' : \'remote-url\' }'
+                                         % recipe_name)
+            return rrs
         return {}
 
     def cross_compiling(self):
@@ -397,6 +407,10 @@ class Config (object):
                 return True
             return False
         return True
+
+    def target_distro_version_gte(self, distro_version):
+        assert distro_version.startswith(self.target_distro + "_")
+        return self.target_distro_version >= distro_version
 
     def _parse(self, filename, reset=True):
         config = {'os': os, '__file__': filename}

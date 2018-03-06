@@ -199,10 +199,12 @@ def system_info():
                 distro_version = DistroVersion.UBUNTU_VIVID
             elif d[2] in ['wily']:
                 distro_version = DistroVersion.UBUNTU_WILY
-            elif d[2] in ['xenial', 'sarah']:
+            elif d[2] in ['xenial', 'sarah', 'serena', 'sonya', 'sylvia']:
                 distro_version = DistroVersion.UBUNTU_XENIAL
             elif d[2] in ['zesty']:
                 distro_version = DistroVersion.UBUNTU_ZESTY
+            elif d[2] in ['artful']:
+                distro_version = DistroVersion.UBUNTU_ARTFUL
             elif d[1].startswith('6.'):
                 distro_version = DistroVersion.DEBIAN_SQUEEZE
             elif d[1].startswith('7.') or d[1].startswith('wheezy'):
@@ -239,6 +241,8 @@ def system_info():
                 distro_version = DistroVersion.FEDORA_25
             elif d[1] == '26':
                 distro_version = DistroVersion.FEDORA_26
+            elif d[1] == '27':
+                distro_version = DistroVersion.FEDORA_27
             elif d[1].startswith('6.'):
                 distro_version = DistroVersion.REDHAT_6
             elif d[1].startswith('7.'):
@@ -287,7 +291,9 @@ def system_info():
     elif platform == Platform.DARWIN:
         distro = Distro.OS_X
         ver = pplatform.mac_ver()[0]
-        if ver.startswith('10.12'):
+        if ver.startswith('10.13'):
+            distro_version = DistroVersion.OS_X_HIGH_SIERRA
+        elif ver.startswith('10.12'):
             distro_version = DistroVersion.OS_X_SIERRA
         elif ver.startswith('10.11'):
             distro_version = DistroVersion.OS_X_EL_CAPITAN
@@ -373,9 +379,8 @@ def add_system_libs(config, new_env):
     '''
     arch = config.target_arch
     libdir = 'lib'
-    if arch == Architecture.X86:
-        arch = 'i386'
-    elif arch == Architecture.X86_64:
+
+    if arch == Architecture.X86_64:
         if config.distro == Distro.REDHAT or config.distro == Distro.SUSE:
             libdir = 'lib64'
 
@@ -385,8 +390,23 @@ def add_system_libs(config, new_env):
 
     search_paths = [os.environ['PKG_CONFIG_LIBDIR'],
         os.path.join(sysroot, 'usr', libdir, 'pkgconfig'),
-        os.path.join(sysroot, 'usr/share/pkgconfig'),
-        os.path.join(sysroot, 'usr/lib/%s-linux-gnu/pkgconfig' % arch)]
+        os.path.join(sysroot, 'usr/share/pkgconfig')]
+
+    if config.target_distro == Distro.DEBIAN:
+        host = None
+        if arch == Architecture.ARM:
+            host = 'arm-linux-gnueabi'
+        elif arch == Architecture.ARM64:
+            host = 'aarch64-linux-gnu'
+        elif arch == Architecture.X86:
+            host = 'i386-linux-gnu'
+        elif Architecture.is_arm(arch):
+            host = 'arm-linux-gnueabihf'
+        else:
+            host = '%s-linux-gnu' % arch
+
+        search_paths.append(os.path.join(sysroot, 'usr/lib/%s/pkgconfig' % host))
+
     new_env['PKG_CONFIG_PATH'] = ':'.join(search_paths)
 
     search_paths = [os.environ.get('ACLOCAL_PATH', ''),
@@ -406,4 +426,27 @@ def needs_xcode8_sdk_workaround(config):
     elif config.target_platform == Platform.IOS:
         if StrictVersion(config.ios_min_version) < StrictVersion('10.0'):
             return True
+    return False
+
+def fix_android_ndk16_cxx(config, destdir):
+    '''
+    Apply fixes for building c++ libraries with gcc for Android with NDK r16+
+
+    @destdir is the destination directory where the shared library will be created
+    '''
+    # FIXME: HACK c++ code fails to link with newer NDK... and libtool.
+    # maybe a standalone toolchain is a better option ?
+    if config.target_platform == Platform.ANDROID:
+        libdir = 'lib'
+        if config.target_arch in [Architecture.X86_64]:
+            libdir = 'lib64'
+        crt_so_path = os.path.join(config.sysroot, 'usr', libdir)
+
+        crtbegin_so = os.path.join(crt_so_path, 'crtbegin_so.o')
+        m.action("copying %s to %s" % (crtbegin_so, destdir))
+        shutil.copy (crtbegin_so, destdir);
+
+        crtend_so = os.path.join(crt_so_path, 'crtend_so.o')
+        m.action("copying %s to %s" % (crtend_so, destdir))
+        shutil.copy (crtend_so, destdir);
     return False

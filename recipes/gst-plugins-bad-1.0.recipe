@@ -1,5 +1,6 @@
 # -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
 
+from cerbero.utils import fix_android_ndk16_cxx
 
 class Recipe(custom.GStreamer):
     name = 'gst-plugins-bad-1.0'
@@ -16,19 +17,19 @@ class Recipe(custom.GStreamer):
         --disable-pvr --disable-sdl --disable-sndfile \
         --disable-teletextdec --disable-timidity \
         --disable-vdpau --disable-voamrwbenc --disable-wildmidi \
-        --disable-xvid --disable-zbar --disable-sdi --disable-qt'
+        --disable-xvid --disable-zbar --disable-sdi'
     # Explicitly enable plugins
     configure_options += ' --enable-bz2 --enable-assrender \
         --enable-faad --enable-kate --enable-openh264 --enable-opus \
         --enable-hls --enable-rtmp --enable-srtp --enable-dts \
         --enable-libmms --enable-resindvd --enable-soundtouch \
         --enable-voaacenc --enable-rsvg --enable-openjpeg --enable-spandsp \
-        --enable-decklink'
+        --enable-decklink --disable-srt'
     remotes = {'origin': 'git://anongit.freedesktop.org/gstreamer/gst-plugins-bad'}
     deps = ['gstreamer-1.0', 'gst-plugins-base-1.0', 'bzip2', 'libass',
             'faad2', 'libkate', 'zlib', 'openh264', 'opus', 'nettle', 'librtmp',
             'libsrtp', 'libdca', 'libmms', 'libdvdnav',
-            'soundtouch', 'vo-aacenc', 'librsvg', 'openjpeg', 'graphene',
+            'soundtouch', 'vo-aacenc', 'librsvg', 'openjpeg',
             'spandsp', 'webrtc-audio-processing', 'sbc', 'ladspa']
     use_system_libs = True
 
@@ -36,14 +37,12 @@ class Recipe(custom.GStreamer):
 
     files_libs = ['libgstcodecparsers-1.0', 'libgstmpegts-1.0', 'libgsturidownloader-1.0',
                   'libgstbasecamerabinsrc-1.0', 'libgstphotography-1.0',
-                  'libgstgl-1.0', 'libgstbadbase-1.0', 'libgstbadvideo-1.0',
+                  'libgstbadvideo-1.0',
                   'libgstinsertbin-1.0', 'libgstadaptivedemux-1.0',
                   'libgstplayer-1.0', 'libgstbadaudio-1.0',
-                  'libgstbadallocators-1.0', 'libgstisoff-1.0']
+                  'libgstisoff-1.0']
 
     files_plugins_devel = [
-        'include/gstreamer-1.0/gst/gl',
-        'lib/gstreamer-1.0/include/gst/gl',
         'include/gstreamer-1.0/gst/mpegts',
         'include/gstreamer-1.0/gst/player',
         'include/gstreamer-1.0/gst/base',
@@ -53,18 +52,14 @@ class Recipe(custom.GStreamer):
         'include/gstreamer-1.0/gst/codecparsers',
         'include/gstreamer-1.0/gst/insertbin',
         'include/gstreamer-1.0/gst/interfaces',
-        'include/gstreamer-1.0/gst/allocators',
         'include/gstreamer-1.0/gst/isoff',
         'lib/pkgconfig/gstreamer-plugins-bad-1.0.pc',
-        'lib/pkgconfig/gstreamer-gl-1.0.pc',
         'lib/pkgconfig/gstreamer-mpegts-1.0.pc',
         'lib/pkgconfig/gstreamer-player-1.0.pc',
-        'lib/pkgconfig/gstreamer-bad-base-1.0.pc',
         'lib/pkgconfig/gstreamer-bad-audio-1.0.pc',
         'lib/pkgconfig/gstreamer-bad-video-1.0.pc',
         'lib/pkgconfig/gstreamer-codecparsers-1.0.pc',
         'lib/pkgconfig/gstreamer-insertbin-1.0.pc',
-        'lib/pkgconfig/gstreamer-bad-allocators-1.0.pc'
     ]
 
     files_plugins_effects = [
@@ -90,7 +85,6 @@ class Recipe(custom.GStreamer):
              'lib/gstreamer-1.0/libgstspeed%(mext)s',
              'lib/gstreamer-1.0/libgstsoundtouch%(mext)s',
              'lib/gstreamer-1.0/libgstvideofiltersbad%(mext)s',
-             'lib/gstreamer-1.0/libgstaudiomixer%(mext)s',
              'lib/gstreamer-1.0/libgstcompositor%(mext)s',
              'lib/gstreamer-1.0/libgstwebrtcdsp%(mext)s',
              'lib/gstreamer-1.0/libgstladspa%(mext)s',
@@ -120,7 +114,6 @@ class Recipe(custom.GStreamer):
              'lib/gstreamer-1.0/libgstspeed.a', 'lib/gstreamer-1.0/libgstspeed.la',
              'lib/gstreamer-1.0/libgstsoundtouch.a', 'lib/gstreamer-1.0/libgstsoundtouch.la',
              'lib/gstreamer-1.0/libgstvideofiltersbad.a', 'lib/gstreamer-1.0/libgstvideofiltersbad.la',
-             'lib/gstreamer-1.0/libgstaudiomixer.a', 'lib/gstreamer-1.0/libgstaudiomixer.la',
              'lib/gstreamer-1.0/libgstcompositor.a', 'lib/gstreamer-1.0/libgstcompositor.la',
              'lib/gstreamer-1.0/libgstwebrtcdsp.a', 'lib/gstreamer-1.0/libgstwebrtcdsp.la',
              'lib/gstreamer-1.0/libgstladspa.a', 'lib/gstreamer-1.0/libgstladspa.la',
@@ -296,63 +289,62 @@ class Recipe(custom.GStreamer):
     platform_files_plugins_sys = {
         Platform.LINUX: [
              'lib/gstreamer-1.0/libgstshm%(mext)s',
-             'lib/gstreamer-1.0/libgstopengl%(mext)s',
+             'lib/gstreamer-1.0/libgstopenglmixers%(mext)s',
              'lib/gstreamer-1.0/libgstdecklink%(mext)s',
             ],
         Platform.WINDOWS: [
              'lib/gstreamer-1.0/libgstd3d%(mext)s',
              'lib/gstreamer-1.0/libgstwasapi%(mext)s',
-             'lib/gstreamer-1.0/libgstopengl%(mext)s',
+             'lib/gstreamer-1.0/libgstopenglmixers%(mext)s',
              'lib/gstreamer-1.0/libgstdecklink%(mext)s',
             ],
         Platform.DARWIN: [
              'lib/gstreamer-1.0/libgstapplemedia%(mext)s',
              'lib/gstreamer-1.0/libgstshm%(mext)s',
-             'lib/gstreamer-1.0/libgstopengl%(mext)s',
+             'lib/gstreamer-1.0/libgstopenglmixers%(mext)s',
              'lib/gstreamer-1.0/libgstdecklink%(mext)s',
             ],
         Platform.IOS: [
              'lib/gstreamer-1.0/libgstapplemedia%(mext)s',
              'lib/gstreamer-1.0/libgstshm%(mext)s',
-             'lib/gstreamer-1.0/libgstopengl%(mext)s',
+             'lib/gstreamer-1.0/libgstopenglmixers%(mext)s',
             ],
         Platform.ANDROID: [
              'lib/gstreamer-1.0/libgstopensles%(mext)s',
-             'lib/gstreamer-1.0/libgstopengl%(mext)s',
+             'lib/gstreamer-1.0/libgstopenglmixers%(mext)s',
             ]
     }
 
     platform_files_plugins_sys_devel = {
         Platform.LINUX: [
              'lib/gstreamer-1.0/libgstshm.a', 'lib/gstreamer-1.0/libgstshm.la',
-             'lib/gstreamer-1.0/libgstopengl.a', 'lib/gstreamer-1.0/libgstopengl.la',
+             'lib/gstreamer-1.0/libgstopenglmixers.a', 'lib/gstreamer-1.0/libgstopenglmixers.la',
              'lib/gstreamer-1.0/libgstdecklink.a', 'lib/gstreamer-1.0/libgstdecklink.la',
             ],
         Platform.WINDOWS: [
              'lib/gstreamer-1.0/libgstd3d.a', 'lib/gstreamer-1.0/libgstd3d.la',
              'lib/gstreamer-1.0/libgstwasapi.a', 'lib/gstreamer-1.0/libgstwasapi.la',
-             'lib/gstreamer-1.0/libgstopengl.a', 'lib/gstreamer-1.0/libgstopengl.la',
+             'lib/gstreamer-1.0/libgstopenglmixers.a', 'lib/gstreamer-1.0/libgstopenglmixers.la',
              'lib/gstreamer-1.0/libgstdecklink.a', 'lib/gstreamer-1.0/libgstdecklink.la',
             ],
         Platform.DARWIN: [
              'lib/gstreamer-1.0/libgstapplemedia.a', 'lib/gstreamer-1.0/libgstapplemedia.la',
              'lib/gstreamer-1.0/libgstshm.a', 'lib/gstreamer-1.0/libgstshm.la',
-             'lib/gstreamer-1.0/libgstopengl.a', 'lib/gstreamer-1.0/libgstopengl.la',
+             'lib/gstreamer-1.0/libgstopenglmixers.a', 'lib/gstreamer-1.0/libgstopenglmixers.la',
              'lib/gstreamer-1.0/libgstdecklink.a', 'lib/gstreamer-1.0/libgstdecklink.la',
             ],
         Platform.IOS: [
              'lib/gstreamer-1.0/libgstapplemedia.a', 'lib/gstreamer-1.0/libgstapplemedia.la',
-             'lib/gstreamer-1.0/libgstopengl.a', 'lib/gstreamer-1.0/libgstopengl.la',
+             'lib/gstreamer-1.0/libgstopenglmixers.a', 'lib/gstreamer-1.0/libgstopenglmixers.la',
              'lib/gstreamer-1.0/libgstshm.a', 'lib/gstreamer-1.0/libgstshm.la',
             ],
         Platform.ANDROID: [
              'lib/gstreamer-1.0/libgstopensles.a', 'lib/gstreamer-1.0/libgstopensles.la',
-             'lib/gstreamer-1.0/libgstopengl.a', 'lib/gstreamer-1.0/libgstopengl.la',
+             'lib/gstreamer-1.0/libgstopenglmixers.a', 'lib/gstreamer-1.0/libgstopenglmixers.la',
             ]
     }
 
     files_typelibs = [
-        'GstGL-1.0',
         'GstInsertBin-1.0',
         'GstMpegts-1.0',
         'GstPlayer-1.0'
@@ -365,8 +357,8 @@ class Recipe(custom.GStreamer):
     }
 
     def prepare(self):
-        self.append_env['CFLAGS'] = " -Wno-error -DGSTREAMER_GLIB_COCOA_NSAPPLICATION=1 "
-        self.append_env['OBJCFLAGS'] = " -Wno-error -DGSTREAMER_GLIB_COCOA_NSAPPLICATION=1 "
+        self.append_env['CFLAGS'] = " -Wno-error "
+        self.append_env['OBJCFLAGS'] = " -Wno-error "
         self.append_env['CXXFLAGS'] = " -Wno-error "
         self.append_env['CPPFLAGS'] = " -Wno-error "
 
@@ -396,3 +388,9 @@ class Recipe(custom.GStreamer):
             self.platform_files_plugins_capture[Platform.LINUX].remove('lib/gstreamer-1.0/libgstdvb%(mext)s')
             self.platform_files_plugins_capture_devel[Platform.LINUX].remove('lib/gstreamer-1.0/libgstdvb.a')
             self.platform_files_plugins_capture_devel[Platform.LINUX].remove('lib/gstreamer-1.0/libgstdvb.la')
+
+    def configure (self):
+        fix_android_ndk16_cxx (self.config, os.path.join(self.make_dir, 'ext', 'openh264'))
+        fix_android_ndk16_cxx (self.config, os.path.join(self.make_dir, 'ext', 'soundtouch'))
+        fix_android_ndk16_cxx (self.config, os.path.join(self.make_dir, 'ext', 'webrtcdsp'))
+        super(recipe.Recipe, self).configure()
