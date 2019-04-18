@@ -1,0 +1,25 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+from cerbero.utils import shell
+
+
+class Recipe(recipe.Recipe):
+    name = 'libflac'
+    version = '1.3.2'
+    stype = SourceType.TARBALL
+    url = 'https://ftp.osuosl.org/pub/xiph/releases/flac/flac-%(version)s.tar.xz'
+    tarball_checksum = '91cfc3ed61dc40f47f050a109b08610667d73477af6ef36dcad31c31a4a8d53f'
+    licenses = [{License.BSD_like: ['COPYING']}]
+    autoreconf = False
+    patches = []
+
+    files_libs = ['libflac']
+    files_devel = ['include/flac', 'lib/pkgconfig/flac.pc', 'share/aclocal/flac.m4']
+
+    def configure(self):
+        if self.config.target_platform == Platform.IOS:
+            if Architecture.is_arm(self.config.target_arch):
+                # These optimizations make the linker think the object file is not
+                # for the arm architecture
+                shell.replace (os.path.join(self.build_dir, 'configure.ac'),
+                               {'-O4': '-O2'})
+        super(recipe.Recipe, self).configure()
