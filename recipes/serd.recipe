@@ -1,0 +1,22 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+class Recipe(recipe.Recipe):
+    name = 'serd'
+    version = '0.30.0'
+    licenses = [{License.BSD_like: ['COPYING']}]
+    btype = BuildType.CUSTOM
+    stype = SourceType.TARBALL
+    url = 'https://download.drobilla.net/serd-0.30.0.tar.bz2'
+    tarball_checksum = '6efb0efa5c2155e6bbac941cddeeabb7ed26d70a57d24178894ff169d8f6cefb'
+
+    def configure(self):
+        shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf configure --no-utils --prefix=' + self.config.prefix)
+
+    def install(self):
+        shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf build install')
+        # remove symbolic links
+        shell.call ('cd ' + os.path.join(self.config.prefix, 'lib') + ' && mv libserd-0.so.0.30.0 libserd-0.so && rm libserd-0.so.*')
+
+    def clean(self):
+        shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf clean')
+

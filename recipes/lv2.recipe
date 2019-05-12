@@ -1,0 +1,20 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+class Recipe(recipe.Recipe):
+    name = 'lv2'
+    version = '1.16.0'
+    licenses = [{License.BSD_like: ['COPYING']}]
+    btype = BuildType.CUSTOM
+    stype = SourceType.TARBALL
+    url = 'https://gitlab.com/lv2/lv2/-/archive/v1.16.0/lv2-v1.16.0.tar.bz2'
+    tarball_checksum = 'ac26ab22be49e9cd8ce560374d40677ba9ce4bd70d9d619fc0da214872dba56d'
+
+    def configure(self):
+        shell.call ('mv ' + os.path.join(self.build_dir, '..', 'lv2-v1.16.0', '*') + ' ' + self.build_dir)
+        shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf configure --prefix=' + self.config.prefix)
+
+    def install(self):
+        shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf build install')
+
+    def clean(self):
+        shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf clean')

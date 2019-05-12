@@ -1,0 +1,23 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+class Recipe(recipe.Recipe):
+    name = 'sord'
+    version = '0.16.2'
+    licenses = [{License.BSD_like: ['COPYING']}]
+    btype = BuildType.CUSTOM
+    stype = SourceType.TARBALL
+    url = 'https://download.drobilla.net/sord-0.16.2.tar.bz2'
+    tarball_checksum = '09f51174dd8f3efbd95f44f0bb0b165f08e066e052d40095de59de787987da8d'
+    deps = ['serd']
+
+    def configure(self):
+        shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf configure --no-utils --prefix=' + self.config.prefix)
+
+    def install(self):
+        shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf build install')
+        # remove symbolic links
+        shell.call ('cd ' + os.path.join(self.config.prefix, 'lib') + ' && mv libsord-0.so.0.16.2 libsord-0.so && rm libsord-0.so.*')
+
+    def clean(self):
+        shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf clean')
+
