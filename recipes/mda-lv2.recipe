@@ -1,14 +1,14 @@
 # -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
 
 class Recipe(recipe.Recipe):
-    name = 'lilv'
-    version = '0.24.4'
+    name = 'mda-lv2'
+    version = '1.2.2'
     licenses = [{License.BSD_like: ['COPYING']}]
     btype = BuildType.CUSTOM
     stype = SourceType.TARBALL
-    url = 'https://download.drobilla.net/lilv-0.24.4.tar.bz2'
-    tarball_checksum = 'c33b84b7a6e8e8fffb412fbcd6f69e59ca297ef3e29d829249b4ccc94f634438'
-    deps = ['lv2', 'serd', 'sord', 'sratom']
+    url = 'https://download.drobilla.net/mda-lv2-1.2.2.tar.bz2'
+    tarball_checksum = 'a476c31ed9f8b009ebacc32a02d06ba9584c0d0d03f03dd62b1354d10a030442'
+    deps = ['lv2']
 
     def configure(self):
         shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf configure --prefix=' + self.config.prefix)
@@ -16,7 +16,7 @@ class Recipe(recipe.Recipe):
     def install(self):
         shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf build install')
         # remove symbolic links
-        shell.call ('cd ' + os.path.join(self.config.prefix, 'lib') + ' && mv liblilv-0.so.0.24.4 liblilv-0.so && rm liblilv-0.so.*')
+        #shell.call ('cd ' + os.path.join(self.config.prefix, 'lib') + ' && mv liblilv-0.so.0.24.4 liblilv-0.so && rm liblilv-0.so.*')
 
     def clean(self):
         shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf clean')
