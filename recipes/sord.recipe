@@ -2,6 +2,7 @@
 
 class Recipe(recipe.Recipe):
     name = 'sord'
+    libNameVersioned = 'libsord-0.so'
     version = '0.16.2'
     licenses = [{License.BSD_like: ['COPYING']}]
     btype = BuildType.CUSTOM
@@ -10,13 +11,14 @@ class Recipe(recipe.Recipe):
     tarball_checksum = '09f51174dd8f3efbd95f44f0bb0b165f08e066e052d40095de59de787987da8d'
     deps = ['serd']
 
+
     def configure(self):
-        shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf configure --no-utils --prefix=' + self.config.prefix)
+        shell.call ('cd ' + os.path.join(self.build_dir) + ' && LDFLAGS="$LDFLAGS -Wl,-soname,' + self.libNameVersioned + '" ./waf configure --no-utils --prefix=' + self.config.prefix)
 
     def install(self):
         shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf build install')
         # remove symbolic links
-        shell.call ('cd ' + os.path.join(self.config.prefix, 'lib') + ' && mv libsord-0.so.0.16.2 libsord-0.so && rm libsord-0.so.*')
+        shell.call ('cd ' + os.path.join(self.config.prefix, 'lib') + ' && mv ' + self.libNameVersioned + '.' + self.version + ' ' + self.libNameVersioned + ' && rm ' + self.libNameVersioned + '.*')
 
     def clean(self):
         shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf clean')

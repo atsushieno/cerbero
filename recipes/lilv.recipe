@@ -2,6 +2,7 @@
 
 class Recipe(recipe.Recipe):
     name = 'lilv'
+    libNameVersioned = 'liblilv-0.so'
     version = '0.24.4'
     licenses = [{License.BSD_like: ['COPYING']}]
     btype = BuildType.CUSTOM
@@ -11,12 +12,12 @@ class Recipe(recipe.Recipe):
     deps = ['lv2', 'serd', 'sord', 'sratom']
 
     def configure(self):
-        shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf configure --prefix=' + self.config.prefix)
+        shell.call ('cd ' + os.path.join(self.build_dir) + ' && LDFLAGS="$LDFLAGS -Wl,-soname,' + self.libNameVersioned + '" ./waf configure --prefix=' + self.config.prefix)
 
     def install(self):
         shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf build install')
         # remove symbolic links
-        shell.call ('cd ' + os.path.join(self.config.prefix, 'lib') + ' && mv liblilv-0.so.0.24.4 liblilv-0.so && rm liblilv-0.so.*')
+        shell.call ('cd ' + os.path.join(self.config.prefix, 'lib') + ' && mv ' + self.libNameVersioned + '.' + self.version + ' ' + self.libNameVersioned + ' && rm ' + self.libNameVersioned + '.*')
 
     def clean(self):
         shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf clean')
