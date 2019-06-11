@@ -3,16 +3,16 @@
 class Recipe(recipe.Recipe):
     name = 'lilv'
     libNameVersioned = 'liblilv-0.so'
-    version = '0.24.4'
+    version = '0.24.5'
     licenses = [{License.BSD_like: ['COPYING']}]
     btype = BuildType.CUSTOM
-    stype = SourceType.TARBALL
-    url = 'https://download.drobilla.net/lilv-0.24.4.tar.bz2'
-    tarball_checksum = 'c33b84b7a6e8e8fffb412fbcd6f69e59ca297ef3e29d829249b4ccc94f634438'
+    stype = SourceType.GIT
+    remotes = {'origin': 'git://github.com/atsushieno/lilv.git'}
+    commit = '49c9d83'
     deps = ['lv2', 'serd', 'sord', 'sratom']
 
     def configure(self):
-        shell.call ('cd ' + os.path.join(self.build_dir) + ' && LDFLAGS="$LDFLAGS -Wl,-soname,' + self.libNameVersioned + '" ./waf configure --prefix=' + self.config.prefix)
+        shell.call ('cd ' + os.path.join(self.build_dir) + ' && LDFLAGS="$LDFLAGS -landroid -Wl,-soname,' + self.libNameVersioned + '" ./waf configure --prefix=' + self.config.prefix)
 
     def install(self):
         shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf build install')

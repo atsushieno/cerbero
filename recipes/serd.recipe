@@ -2,22 +2,22 @@
 
 class Recipe(recipe.Recipe):
     name = 'serd'
-    libNameVersioned = 'libserd-0.so'
     version = '0.30.0'
+    libNameVersioned = 'libserd-0.so'
     licenses = [{License.BSD_like: ['COPYING']}]
     btype = BuildType.CUSTOM
-    stype = SourceType.TARBALL
-    url = 'https://download.drobilla.net/serd-0.30.0.tar.bz2'
-    tarball_checksum = '6efb0efa5c2155e6bbac941cddeeabb7ed26d70a57d24178894ff169d8f6cefb'
+    stype = SourceType.GIT
+    remotes = {'origin': 'git://github.com/atsushieno/serd.git'}
+    commit = '7a98a7b'
 
     def configure(self):
-        shell.call ('cd ' + os.path.join(self.build_dir) + ' && LDFLAGS="$LDFLAGS -Wl,-soname,' + self.libNameVersioned + '" ./waf configure --no-utils --prefix=' + self.config.prefix)
+        shell.call ('cd ' + self.build_dir + ' && LDFLAGS="$LDFLAGS -landroid -Wl,-soname,' + self.libNameVersioned + '" ./waf configure --no-utils --prefix=' + self.config.prefix)
 
     def install(self):
-        shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf build install')
+        shell.call ('cd ' + self.build_dir + ' && ./waf build install')
         # remove symbolic links
-        shell.call ('cd ' + os.path.join(self.config.prefix, 'lib') + ' && mv ' + self.libNameVersioned + '.' + self.version + ' ' + self.libNameVersioned + ' && rm ' + self.libNameVersioned + '.*')
+        shell.call ('cd ' + os.path.join(self.config.prefix, 'lib') + ' && cp ' + self.libNameVersioned + ' _tmp.so && rm ' + self.libNameVersioned + '.* && mv _tmp.so ' + self.libNameVersioned)
 
     def clean(self):
-        shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf clean')
+        shell.call ('cd ' + self.build_dir + ' && ./waf clean')
 
