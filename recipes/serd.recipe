@@ -8,7 +8,7 @@ class Recipe(recipe.Recipe):
     btype = BuildType.CUSTOM
     stype = SourceType.GIT
     remotes = {'origin': 'git://github.com/atsushieno/serd.git'}
-    commit = '7a98a7b'
+    commit = '6485e1c'
 
     def configure(self):
         shell.call ('cd ' + self.build_dir + ' && LDFLAGS="$LDFLAGS -landroid -Wl,-soname,' + self.libNameVersioned + '" ./waf configure --no-utils --prefix=' + self.config.prefix)

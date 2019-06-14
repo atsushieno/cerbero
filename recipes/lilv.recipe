@@ -8,7 +8,7 @@ class Recipe(recipe.Recipe):
     btype = BuildType.CUSTOM
     stype = SourceType.GIT
     remotes = {'origin': 'git://github.com/atsushieno/lilv.git'}
-    commit = '49c9d83'
+    commit = '01d2015'
     deps = ['lv2', 'serd', 'sord', 'sratom']
 
     def configure(self):

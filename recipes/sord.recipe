@@ -6,14 +6,14 @@ class Recipe(recipe.Recipe):
     version = '0.16.2'
     licenses = [{License.BSD_like: ['COPYING']}]
     btype = BuildType.CUSTOM
-    stype = SourceType.TARBALL
-    url = 'https://download.drobilla.net/sord-0.16.2.tar.bz2'
-    tarball_checksum = '09f51174dd8f3efbd95f44f0bb0b165f08e066e052d40095de59de787987da8d'
+    stype = SourceType.GIT
+    remotes = {'origin': 'git://github.com/atsushieno/sord.git'}
+    commit = '378076a'
     deps = ['serd']
 
 
     def configure(self):
-        shell.call ('cd ' + os.path.join(self.build_dir) + ' && LDFLAGS="$LDFLAGS -Wl,-soname,' + self.libNameVersioned + '" ./waf configure --no-utils --prefix=' + self.config.prefix)
+        shell.call ('cd ' + os.path.join(self.build_dir) + ' && LDFLAGS="$LDFLAGS -llog -Wl,-soname,' + self.libNameVersioned + '" ./waf configure --no-utils --prefix=' + self.config.prefix)
 
     def install(self):
         shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf build install')
