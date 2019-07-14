@@ -24,13 +24,13 @@ from cerbero.bootstrap.bootstrapper import register_bootstrapper
 from cerbero.config import Distro, FatalError
 from cerbero.utils import _, shell
 
-NDK_VERSION = 'r20-beta1'
+NDK_VERSION = 'r20'
 NDK_BASE_URL = 'https://dl.google.com/android/repository/android-ndk-%s-%s-%s.zip'
 NDK_CHECKSUMS = {
-    'android-ndk-r20-beta1-linux-x86_64.zip': '5d8c79dbea9e01449a4766f214c77ea5395af80e7c7d9364c4faeef8d433b94e',
-    'android-ndk-r20-beta1-darwin-x86_64.zip': '0baeec3560da872d1433e4bb4cc1d1950dda9a99ce493f6b9e75ff9ba960a6ee',
-    'android-ndk-r20-beta1-windows-x86_64.zip': 'ed9bb51719f3a6fbe3548d9c887859c252c6c77b9fa625c207292f323d763cbd',
-    'android-ndk-r20-beta1-windows-x86.zip': '2796386ea2f9a3e55f54bc5c5ba20e28875dbf94b6c98feb73256b8df5579397',
+    'android-ndk-r20-linux-x86_64.zip': '57435158f109162f41f2f43d5563d2164e4d5d0364783a9a6fab3ef12cb06ce0',
+    'android-ndk-r20-darwin-x86_64.zip': '2ec06c4576c6ad50a727f0a5fbd0f67563aa6e8b348cff904b029622a470f2f1',
+    'android-ndk-r20-windows-x86_64.zip': '315cdfdb971ee85a71e267da2cc7d6667ec722c3649aedc45cd42a97b2e8b056',
+    'android-ndk-r20-windows-x86.zip': '7541bacd22f5757b9947314ee71111e18fc7db852ac67b23b7dbace229b941cf',
 }
 
 class AndroidBootstrapper (BootstrapperBase):
