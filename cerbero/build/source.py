@@ -290,7 +290,7 @@ class GitCache (Source):
         if 'origin' in self.remotes:
             url = self.replace_name_and_version(self.remotes['origin'])
             o = urllib.parse.urlparse(url)
-            if o.scheme in ('http'):
+            if o.scheme in ('http', 'git'):
                 raise FatalError('git remote origin URL {!r} must use HTTPS not {!r}'
                                  ''.format(url, o.scheme))
             if o.scheme in ('file', 'ssh'):

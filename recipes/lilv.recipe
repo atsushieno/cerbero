@@ -7,7 +7,7 @@ class Recipe(recipe.Recipe):
     licenses = [{License.BSD_like: ['COPYING']}]
     btype = BuildType.CUSTOM
     stype = SourceType.GIT
-    remotes = {'origin': 'git://github.com/atsushieno/lilv.git'}
+    remotes = {'origin': 'https://github.com/atsushieno/lilv.git'}
     commit = 'eab8802'
     deps = ['lv2', 'serd', 'sord', 'sratom']
 

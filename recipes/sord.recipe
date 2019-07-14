@@ -7,7 +7,7 @@ class Recipe(recipe.Recipe):
     licenses = [{License.BSD_like: ['COPYING']}]
     btype = BuildType.CUSTOM
     stype = SourceType.GIT
-    remotes = {'origin': 'git://github.com/atsushieno/sord.git'}
+    remotes = {'origin': 'https://github.com/atsushieno/sord.git'}
     commit = '378076a'
     deps = ['serd']
 
