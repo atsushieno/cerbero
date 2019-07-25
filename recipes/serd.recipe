@@ -11,7 +11,7 @@ class Recipe(recipe.Recipe):
     commit = '6485e1c'
 
     def configure(self):
-        shell.call ('cd ' + self.build_dir + ' && LDFLAGS="$LDFLAGS -landroid -Wl,-soname,' + self.libNameVersioned + '" ./waf configure --no-utils --prefix=' + self.config.prefix)
+        shell.call ('cd ' + self.build_dir + ' && LDFLAGS="$LDFLAGS -landroid -Wl,-soname,' + self.libNameVersioned + '" ./waf configure -d --no-utils --prefix=' + self.config.prefix)
 
     def install(self):
         shell.call ('cd ' + self.build_dir + ' && ./waf build install')

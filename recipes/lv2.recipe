@@ -12,7 +12,7 @@ class Recipe(recipe.Recipe):
 
     def configure(self):
         shell.call ('mv ' + os.path.join(self.build_dir, '..', 'lv2-v1.16.0', '*') + ' ' + self.build_dir)
-        shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf configure --no-coverage --prefix=' + self.config.prefix)
+        shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf configure -d --no-coverage --prefix=' + self.config.prefix)
 
     def install(self):
         shell.call ('cd ' + os.path.join(self.build_dir) + ' && ./waf build install')
