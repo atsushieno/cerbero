@@ -31,7 +31,9 @@ from distutils.version import StrictVersion
 import gettext
 import platform as pplatform
 import re
+import asyncio
 from pathlib import Path
+from collections.abc import Iterable
 
 from cerbero.enums import Platform, Architecture, Distro, DistroVersion
 from cerbero.errors import FatalError
@@ -57,7 +59,7 @@ def user_is_root():
 
 
 def determine_num_of_cpus():
-    ''' Number of virtual or physical CPUs on this system '''
+    ''' Number of virtual or logical CPUs on this system '''
 
     # Python 2.6+
     try:
@@ -206,7 +208,7 @@ def system_info():
                 distro_version = DistroVersion.UBUNTU_XENIAL
             elif d[2] in ['artful']:
                 distro_version = DistroVersion.UBUNTU_ARTFUL
-            elif d[2] in ['bionic', 'tara', 'tessa']:
+            elif d[2] in ['bionic', 'tara', 'tessa', 'tina']:
                 distro_version = DistroVersion.UBUNTU_BIONIC
             elif d[2] in ['cosmic']:
                 distro_version = DistroVersion.UBUNTU_COSMIC
@@ -222,6 +224,8 @@ def system_info():
                 distro_version = DistroVersion.DEBIAN_STRETCH
             elif d[1].startswith('10.') or d[1].startswith('buster'):
                 distro_version = DistroVersion.DEBIAN_BUSTER
+            elif d[1].startswith('11.') or d[1].startswith('bullseye'):
+                distro_version = DistroVersion.DEBIAN_BULLSEYE
             else:
                 raise FatalError("Distribution '%s' not supported" % str(d))
         elif d[0] in ['RedHat', 'Fedora', 'CentOS', 'Red Hat Enterprise Linux Server', 'CentOS Linux']:
@@ -256,6 +260,8 @@ def system_info():
                 distro_version = DistroVersion.FEDORA_29
             elif d[1] == '30':
                 distro_version = DistroVersion.FEDORA_30
+            elif d[1] == '31':
+                distro_version = DistroVersion.FEDORA_31
             elif d[1].startswith('6.'):
                 distro_version = DistroVersion.REDHAT_6
             elif d[1].startswith('7.'):
@@ -304,7 +310,9 @@ def system_info():
     elif platform == Platform.DARWIN:
         distro = Distro.OS_X
         ver = pplatform.mac_ver()[0]
-        if ver.startswith('10.14'):
+        if ver.startswith('10.15'):
+            distro_version = DistroVersion.OS_X_CATALINA
+        elif ver.startswith('10.14'):
             distro_version = DistroVersion.OS_X_MOJAVE
         elif ver.startswith('10.13'):
             distro_version = DistroVersion.OS_X_HIGH_SIERRA
@@ -389,7 +397,7 @@ def get_wix_prefix():
         raise FatalError("The required packaging tool 'WiX' was not found")
     return escape_path(to_unixpath(wix_prefix))
 
-def add_system_libs(config, new_env):
+def add_system_libs(config, new_env, old_env=None):
     '''
     Add /usr/lib/pkgconfig to PKG_CONFIG_PATH so the system's .pc file
     can be found.
@@ -405,7 +413,13 @@ def add_system_libs(config, new_env):
     if config.sysroot:
         sysroot = config.sysroot
 
-    search_paths = [os.environ['PKG_CONFIG_LIBDIR'],
+    if not old_env:
+        old_env = os.environ
+
+    search_paths = []
+    if old_env.get('PKG_CONFIG_LIBDIR', None):
+       search_paths += [old_env['PKG_CONFIG_LIBDIR']]
+    search_paths += [
         os.path.join(sysroot, 'usr', libdir, 'pkgconfig'),
         os.path.join(sysroot, 'usr/share/pkgconfig')]
 
@@ -507,3 +521,36 @@ def detect_qt5(platform, arch, is_universal):
     if ret == (None, None):
         m.warning('Unsupported arch {!r} on platform {!r}'.format(arch, platform))
     return ret
+
+# asyncio.Semaphore classes set their working event loop internally on
+# creation, so we need to ensure the proper loop has already been set by then.
+# This is especially important if we create global semaphores that are
+# initialized at the very beginning, since on Windows, the default
+# SelectorEventLoop is not available.
+def CerberoSemaphore(value=1):
+    get_event_loop() # this ensures the proper event loop is already created
+    return asyncio.Semaphore(value)
+
+def get_event_loop():
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    # On Windows the default SelectorEventLoop is not available:
+    # https://docs.python.org/3.5/library/asyncio-subprocess.html#windows-event-loop
+    if sys.platform == 'win32' and \
+       not isinstance(loop, asyncio.ProactorEventLoop):
+        loop = asyncio.ProactorEventLoop()
+        asyncio.set_event_loop(loop)
+
+    return loop
+
+def run_until_complete(tasks):
+    loop = get_event_loop()
+
+    if isinstance(tasks, Iterable):
+        loop.run_until_complete(asyncio.gather(*tasks))
+    else:
+        loop.run_until_complete(tasks)

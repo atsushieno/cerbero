@@ -16,13 +16,13 @@
 # Free Software Foundation, Inc., 59 Temple Place - Suite 330,
 # Boston, MA 02111-1307, USA.
 import os
+import re
 
 from cerbero.config import Platform
 from cerbero.utils import shell
 
 
 class RecursiveLister():
-
 
     def list_file_deps(self, prefix, path):
         raise NotImplemented()
@@ -47,9 +47,10 @@ class RecursiveLister():
 class ObjdumpLister(RecursiveLister):
 
     def list_file_deps(self, prefix, path):
-        files = shell.check_call('objdump -x %s' % path).split('\n')
-        files = [x.split(' ')[2] for x in files if 'DLL ' in x]
-        files = [os.path.join(prefix, 'bin', x) for x in files if \
+        files = shell.check_call('LC_ALL=C objdump -xw %s' % path).splitlines()
+        prog = re.compile(r"(?i)^.*DLL[^:]*: (\S+\.dll)$")
+        files = [prog.sub(r"\1", x) for x in files if prog.match(x) is not None]
+        files = [os.path.join(prefix, 'bin', x) for x in files if
                  x.lower().endswith('dll')]
         return [os.path.realpath(x) for x in files if os.path.exists(x)]
 
@@ -58,7 +59,10 @@ class OtoolLister(RecursiveLister):
 
     def list_file_deps(self, prefix, path):
         files = shell.check_call('otool -L %s' % path).split('\n')[1:]
-        return [x.split(' ')[0][1:] for x in files if prefix in x]
+        # Shared libraries might be relocated, we look for files with the
+        # prefix or starting with @rpath
+        files = [x.strip().split(' ')[0] for x in files if prefix in x or "@rpath" in x]
+        return [x.replace("@rpath/", prefix) for x in files]
 
 
 class LddLister():

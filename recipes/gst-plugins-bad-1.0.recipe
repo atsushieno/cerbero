@@ -58,14 +58,13 @@ class Recipe(custom.GStreamer):
                      'opencv': 'disabled',
                      'sndfile': 'disabled',
                      'teletext': 'disabled',
-                     'vdpau': 'disabled',
                      'voamrwbenc': 'disabled',
                      'wildmidi': 'disabled',
                     }
     deps = ['gstreamer-1.0', 'gst-plugins-base-1.0', 'bzip2', 'libass',
             'libkate', 'zlib', 'openh264', 'opus', 'nettle', 'librtmp',
             'libsrtp', 'libdca', 'libmms', 'libdvdnav', 'libnice',
-            'soundtouch', 'vo-aacenc', 'librsvg', 'openjpeg', 'openssl',
+            'soundtouch', 'vo-aacenc', 'librsvg', 'openjpeg',
             'pango', 'spandsp', 'webrtc-audio-processing', 'sbc', 'ladspa',
             'srt', 'libusrsctp', 'zbar']
     use_system_libs = True
@@ -444,8 +443,7 @@ class Recipe(custom.GStreamer):
             self.disable_plugin('rsvg', 'codecs', dep='librsvg')
 
         # Enable hardware codecs if variants are enabled
-        self.enable_plugin('nvenc', 'codecs', 'nvcodec', option='nvenc')
-        self.enable_plugin('nvdec', 'codecs', 'nvcodec', option='nvdec')
+        self.enable_plugin('nvcodec', 'codecs', 'nvcodec', option='nvcodec')
         self.enable_plugin('msdk', 'codecs', 'intelmsdk', option='msdk')
 
         if self.config.target_platform == Platform.WINDOWS:
@@ -472,6 +470,9 @@ class Recipe(custom.GStreamer):
 
         if self.config.target_platform in (Platform.ANDROID, Platform.IOS):
             self.disable_plugin('resindvd', 'dvd', dep='libdvdnav')
+
+        if self.config.target_platform != Platform.LINUX or self.config.cross_compiling():
+            self.deps.append('openssl')
 
         if self.config.variants.nodebug:
             self.append_env('CFLAGS', '-DGST_LEVEL_MAX=GST_LEVEL_FIXME')

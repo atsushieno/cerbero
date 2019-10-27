@@ -23,10 +23,10 @@ import traceback
 import asyncio
 from subprocess import CalledProcessError
 
-from cerbero.enums import Architecture, Platform
+from cerbero.enums import Architecture, Platform, LibraryType
 from cerbero.errors import BuildStepError, FatalError, AbortedError
 from cerbero.build.recipe import Recipe, BuildSteps
-from cerbero.utils import _, N_, shell
+from cerbero.utils import _, N_, shell, run_until_complete
 from cerbero.utils import messages as m
 
 import inspect
@@ -68,8 +68,6 @@ class Oven (object):
     @type deps_only: bool
     '''
 
-    STEP_TPL = '[(%s/%s) %s -> %s ]'
-
     def __init__(self, recipes, cookbook, force=False, no_deps=False,
                  missing_files=False, dry_run=False, deps_only=False):
         if isinstance(recipes, Recipe):
@@ -107,6 +105,7 @@ class Oven (object):
                   ' '.join([x.name for x in ordered_recipes]))
 
         i = 1
+        self._static_libraries_built = []
         for recipe in ordered_recipes:
             try:
                 self._cook_recipe(recipe, i, len(ordered_recipes))
@@ -118,7 +117,7 @@ class Oven (object):
                 action = shell.prompt_multiple(msg, RecoveryActions())
                 if action == RecoveryActions.SHELL:
                     shell.enter_build_environment(self.config.target_platform,
-                            be.arch, recipe.get_for_arch (be.arch, 'build_dir'))
+                            be.arch, recipe.get_for_arch (be.arch, 'build_dir'), env=recipe.config.env)
                     raise be
                 elif action == RecoveryActions.RETRY_ALL:
                     shutil.rmtree(recipe.get_for_arch (be.arch, 'build_dir'))
@@ -134,6 +133,11 @@ class Oven (object):
             i += 1
 
     def _cook_recipe(self, recipe, count, total):
+        # A Recipe depending on a static library that has been rebuilt
+        # also needs to be rebuilt to pick up the latest build.
+        if recipe.library_type != LibraryType.STATIC:
+            if len(set(self._static_libraries_built) & set(recipe.deps)) != 0:
+                self.cookbook.reset_recipe_status(recipe.name)
         if not self.cookbook.recipe_needs_build(recipe.name) and \
                 not self.force:
             m.build_step(count, total, recipe.name, _("already built"))
@@ -156,14 +160,7 @@ class Oven (object):
                 if not stepfunc:
                     raise FatalError(_('Step %s not found') % step)
                 if asyncio.iscoroutinefunction(stepfunc):
-                    loop = asyncio.get_event_loop()
-                    # On Windows the default SelectorEventLoop is not available:
-                    # https://docs.python.org/3.5/library/asyncio-subprocess.html#windows-event-loop
-                    if recipe.config.platform == Platform.WINDOWS and \
-                       not isinstance(loop, asyncio.ProactorEventLoop):
-                        loop = asyncio.ProactorEventLoop()
-                        asyncio.set_event_loop(loop)
-                    loop.run_until_complete(stepfunc(recipe))
+                    run_until_complete(stepfunc())
                 else:
                     stepfunc()
                 # update status successfully
@@ -185,6 +182,8 @@ class Oven (object):
             except Exception:
                 raise BuildStepError(recipe, step, traceback.format_exc())
         self.cookbook.update_build_status(recipe.name, recipe.built_version())
+        if recipe.library_type == LibraryType.STATIC:
+            self._static_libraries_built.append(recipe.name)
 
         if self.missing_files:
             self._print_missing_files(recipe, tmp)

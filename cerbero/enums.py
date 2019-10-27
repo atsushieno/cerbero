@@ -71,6 +71,7 @@ class DistroVersion:
     DEBIAN_JESSIE = 'debian_08_jessie'
     DEBIAN_STRETCH = 'debian_09_stretch'
     DEBIAN_BUSTER = 'debian_10_buster'
+    DEBIAN_BULLSEYE = 'debian_11_bullseye'
     UBUNTU_LUCID = 'ubuntu_10_04_lucid'
     UBUNTU_MAVERICK = 'ubuntu_10_10_maverick'
     UBUNTU_NATTY = 'ubuntu_11_04_natty'
@@ -103,6 +104,7 @@ class DistroVersion:
     FEDORA_28 = 'fedora_28'
     FEDORA_29 = 'fedora_29'
     FEDORA_30 = 'fedora_30'
+    FEDORA_31 = 'fedora_31'
     REDHAT_6 = 'redhat_6'
     REDHAT_7 = 'redhat_7'
     # Amazon Linux seems to be RedHat/CentOS-based
@@ -125,6 +127,7 @@ class DistroVersion:
     OS_X_SIERRA = 'osx_sierra'
     OS_X_HIGH_SIERRA = 'osx_high_sierra'
     OS_X_MOJAVE = 'osx_mojave'
+    OS_X_CATALINA = 'osx_catalina'
     IOS_8_0 = 'ios_08_0'
     IOS_8_1 = 'ios_08_1'
     IOS_8_2 = 'ios_08_2'
@@ -146,6 +149,9 @@ class DistroVersion:
     IOS_12_0 = 'ios_12_0'
     IOS_12_1 = 'ios_12_1'
     IOS_12_2 = 'ios_12_2'
+    IOS_12_3 = 'ios_12_3'
+    IOS_12_4 = 'ios_12_4'
+    # further ios versions are generated automatically
     ANDROID_GINGERBREAD = 'android_09_gingerbread'  # API Level 9
     ANDROID_ICE_CREAM_SANDWICH = 'android_14_ice_cream_sandwich'  # API Level 14
     ANDROID_JELLY_BEAN = 'android_16_jelly_bean'  # API Level 16
@@ -176,6 +182,12 @@ class DistroVersion:
         else:
             raise FatalError("DistroVersion not supported")
 
+    @staticmethod
+    def get_ios_sdk_version(version):
+        if not version.startswith('ios_'):
+            raise FatalError('Not an iOS version: ' + version)
+        return [int(s) for s in version[4:].split('_')]
+
 class LicenseDescription:
 
     def __init__(self, acronym, pretty_name):
@@ -198,26 +210,14 @@ class License:
             'BSD-like License')
     FreeType = LicenseDescription('FreeType',
             'FreeType License')
-    GPLv2 = LicenseDescription('GPL-2',
-            'GNU General Public License, version 2')
     GPLv2Plus = LicenseDescription('GPL-2+',
             'GNU General Public License, version 2 or later')
-    GPLv3 = LicenseDescription('GPL-3',
-            'GNU General Public License, version 3')
     GPLv3Plus = LicenseDescription('GPL-3+',
             'GNU General Public License, version 3 or later')
-    LGPL = LicenseDescription('LGPL',
-            'GNU Lesser General Public License')
-    LGPLv2 = LicenseDescription('LGPL-2',
-            'GNU Lesser General Public License, version 2')
     LGPLv2Plus = LicenseDescription('LGPL-2+',
             'GNU Lesser General Public License, version 2 or later')
-    LGPLv2_1 = LicenseDescription('LGPL-2.1',
-            'GNU Lesser General Public License, version 2.1')
     LGPLv2_1Plus = LicenseDescription('LGPL-2.1+',
             'GNU Lesser General Public License, version 2.1 or later')
-    LGPLv3 = LicenseDescription('LGPL-3',
-            'GNU Lesser General Public License, version 3')
     LGPLv3Plus = LicenseDescription('LGPL-3+',
             'GNU Lesser General Public License, version 3 or later')
     LibPNG = LicenseDescription('LibPNG',
