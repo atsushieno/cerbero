@@ -23,7 +23,7 @@ import urllib.request, urllib.parse, urllib.error
 from hashlib import sha256
 
 from cerbero.config import Platform, DEFAULT_MIRRORS
-from cerbero.utils import git, svn, shell, _
+from cerbero.utils import git, svn, shell, _, run_until_complete
 from cerbero.errors import FatalError, InvalidRecipeError
 import cerbero.utils.messages as m
 
@@ -61,21 +61,8 @@ class Source (object):
         if self.patches is None:
             self.patches = []
 
-    def _fetch_env_setup(self):
-        # When running git commands, which is the host git, we need to make
-        # sure it is run in an environment which doesn't pick up the libraries
-        # we build in cerbero
-        env = os.environ.copy()
-        env["LD_LIBRARY_PATH"] = self.config._pre_environ.get("LD_LIBRARY_PATH", "")
-        shell.set_call_env(env)
-
-    def _fetch_env_restore(self):
-        shell.restore_call_env()
-
-    def fetch(self, **kwargs):
-        self._fetch_env_setup()
+    async def fetch(self, **kwargs):
         self.fetch_impl(**kwargs)
-        self._fetch_env_restore()
 
     def fetch_impl(self):
         '''
@@ -83,7 +70,7 @@ class Source (object):
         '''
         raise NotImplemented("'fetch' must be implemented by subclasses")
 
-    def extract(self):
+    async def extract(self):
         '''
         Extracts the sources
         '''
@@ -133,10 +120,10 @@ class Source (object):
 
 class CustomSource (Source):
 
-    def fetch_impl(self):
+    async def fetch(self):
         pass
 
-    def extract(self):
+    async def extract(self):
         pass
 
 
@@ -168,22 +155,20 @@ class BaseTarball(object):
         if o.scheme in ('http', 'ftp'):
             raise FatalError('Download URL {!r} must use HTTPS'.format(self.url))
 
-    def fetch_impl(self, redownload=False):
+    async def fetch(self, redownload=False):
         if self.offline:
             if not os.path.isfile(self.download_path):
                 msg = 'Offline mode: tarball {!r} not found in local sources ({})'
                 raise FatalError(msg.format(self.tarball_name, self.download_dir))
             self.verify()
-            m.action(_('Found %s at %s') % (self.url, self.download_path))
+            m.action(_('Found %s at %s') % (self.url, self.download_path), logfile=get_logfile(self))
             return
         if not os.path.exists(self.download_dir):
             os.makedirs(self.download_dir)
-        m.action(_('Fetching tarball %s to %s') %
-                 (self.url, self.download_path))
         # Enable certificate checking only on Linux for now
         # FIXME: Add more platforms here after testing
         cc = self.config.platform == Platform.LINUX
-        shell.download(self.url, self.download_path, check_cert=cc,
+        await shell.download(self.url, self.download_path, check_cert=cc,
             overwrite=redownload, logfile=get_logfile(self),
             mirrors= self.config.extra_mirrors + DEFAULT_MIRRORS)
         self.verify()
@@ -209,20 +194,20 @@ class BaseTarball(object):
         if checksum != self.tarball_checksum:
             movedto = fname + '.failed-checksum'
             os.replace(fname, movedto)
-            m.action(_('Checksum failed, tarball %s moved to %s') % (fname, movedto))
+            m.action(_('Checksum failed, tarball %s moved to %s') % (fname, movedto), logfile=get_logfile(self))
             if not fatal:
                 return False
             raise FatalError('Checksum for {} is {!r} instead of {!r}'
                              .format(fname, checksum, self.tarball_checksum))
         return True
 
-    def extract_tarball(self, unpack_dir):
+    async def extract_tarball(self, unpack_dir):
         try:
-            shell.unpack(self.download_path, unpack_dir, logfile=get_logfile(self))
+            await shell.unpack(self.download_path, unpack_dir, logfile=get_logfile(self))
         except (IOError, EOFError, tarfile.ReadError):
-            m.action(_('Corrupted or partial tarball, redownloading...'))
-            self.fetch(redownload=True)
-            shell.unpack(self.download_path, unpack_dir, logfile=get_logfile(self))
+            m.action(_('Corrupted or partial tarball, redownloading...'), logfile=get_logfile(self))
+            await self.fetch(redownload=True)
+            await shell.unpack(self.download_path, unpack_dir, logfile=get_logfile(self))
 
 
 class Tarball(BaseTarball, Source):
@@ -243,7 +228,7 @@ class Tarball(BaseTarball, Source):
         self.download_dir = self.repo_dir
         BaseTarball.__init__(self)
 
-    def fetch_impl(self, redownload=False):
+    async def fetch(self, redownload=False):
         if not os.path.exists(self.download_dir):
             os.makedirs(self.download_dir)
 
@@ -251,16 +236,16 @@ class Tarball(BaseTarball, Source):
                                    self.package_name, self.tarball_name)
         if not redownload and os.path.isfile(cached_file) and self.verify(cached_file, fatal=False):
             m.action(_('Copying cached tarball from %s to %s instead of %s') %
-                     (cached_file, self.download_path, self.url))
+                     (cached_file, self.download_path, self.url), logfile=get_logfile(self))
             shutil.copy(cached_file, self.download_path)
             return
-        super().fetch_impl(redownload=redownload)
+        await super().fetch(redownload=redownload)
 
-    def extract(self):
-        m.action(_('Extracting tarball to %s') % self.build_dir)
+    async def extract(self):
+        m.action(_('Extracting tarball to %s') % self.build_dir, logfile=get_logfile(self))
         if os.path.exists(self.build_dir):
             shutil.rmtree(self.build_dir)
-        self.extract_tarball(self.config.sources)
+        await self.extract_tarball(self.config.sources)
         if self.tarball_dirname is not None:
             extracted = os.path.join(self.config.sources, self.tarball_dirname)
             # Since we just extracted this, a Windows anti-virus might still
@@ -304,7 +289,7 @@ class GitCache (Source):
         self.repo_dir = os.path.join(self.config.local_sources, self.name)
         self._previous_env = None
 
-    def fetch_impl(self, checkout=True):
+    async def fetch(self, checkout=True):
         # First try to get the sources from the cached dir if there is one
         cached_dir = os.path.join(self.config.cached_sources,  self.name)
 
@@ -317,7 +302,7 @@ class GitCache (Source):
         if os.path.isdir(os.path.join(cached_dir, ".git")):
             for remote, url in self.remotes.items():
                 git.add_remote(self.repo_dir, remote, "file://" + cached_dir, logfile=get_logfile(self))
-            git.fetch(self.repo_dir, fail=False, logfile=get_logfile(self))
+            await git.fetch(self.repo_dir, fail=False, logfile=get_logfile(self))
         else:
             cached_dir = None
             # add remotes from both upstream and config so user can easily
@@ -326,11 +311,11 @@ class GitCache (Source):
                 git.add_remote(self.repo_dir, remote, url, logfile=get_logfile(self))
             # fetch remote branches
             if not self.offline:
-                git.fetch(self.repo_dir, fail=False, logfile=get_logfile(self))
+                await git.fetch(self.repo_dir, fail=False, logfile=get_logfile(self))
         if checkout:
             commit = self.config.recipe_commit(self.name) or self.commit
-            git.checkout(self.repo_dir, commit, logfile=get_logfile(self))
-            git.submodules_update(self.repo_dir, cached_dir, fail=False, offline=self.offline, logfile=get_logfile(self))
+            await git.checkout(self.repo_dir, commit, logfile=get_logfile(self))
+            await git.submodules_update(self.repo_dir, cached_dir, fail=False, offline=self.offline, logfile=get_logfile(self))
 
 
     def built_version(self):
@@ -354,11 +339,11 @@ class LocalTarball (GitCache):
         self.package_name = self.package_name
         self.unpack_dir = self.config.sources
 
-    def extract(self):
+    async def extract(self):
         if not os.path.exists(self.build_dir):
             os.mkdir(self.build_dir)
         self._find_tarball()
-        shell.unpack(self.tarball_path, self.unpack_dir, logfile=get_logfile(self))
+        await shell.unpack(self.tarball_path, self.unpack_dir, logfile=get_logfile(self))
         # apply common patches
         self._apply_patches(self.repo_dir)
         # apply platform patches
@@ -398,7 +383,7 @@ class Git (GitCache):
         # For forced commits in the config
         self.commit = self.config.recipe_commit(self.name) or self.commit
 
-    def extract(self):
+    async def extract(self):
         if os.path.exists(self.build_dir):
             try:
                 commit_hash = git.get_hash(self.repo_dir, self.commit)
@@ -412,7 +397,7 @@ class Git (GitCache):
             os.mkdir(self.build_dir)
 
         # checkout the current version
-        git.local_checkout(self.build_dir, self.repo_dir, self.commit, logfile=get_logfile(self))
+        await git.local_checkout(self.build_dir, self.repo_dir, self.commit, logfile=get_logfile(self))
 
         for patch in self.patches:
             if not os.path.isabs(patch):
@@ -443,8 +428,8 @@ class GitExtractedTarball(Git):
         Git.__init__(self)
         self._files = {}
 
-    def extract(self):
-        if not Git.extract(self):
+    async def extract(self):
+        if not await Git.extract(self):
             return False
         for match in self.matches:
             self._files[match] = []
@@ -483,13 +468,13 @@ class Svn(Source):
         # For forced revision in the config
         self.revision = self.config.recipe_commit(self.name) or self.revision
 
-    def fetch_impl(self):
+    async def fetch(self):
         cached_dir = os.path.join(self.config.cached_sources, self.package_name)
         if os.path.isdir(os.path.join(cached_dir, ".svn")):
             if os.path.exists(self.repo_dir):
                 shutil.rmtree(self.repo_dir)
             m.action(_('Copying cached repo from %s to %s instead of %s') %
-                     (cached_dir, self.repo_dir, self.url))
+                     (cached_dir, self.repo_dir, self.url), logfile=get_logfile(self))
             shell.copy_dir(cached_dir, self.repo_dir)
             return
 
@@ -504,10 +489,10 @@ class Svn(Source):
 
         if checkout:
             os.makedirs(self.repo_dir, exist_ok=True)
-            svn.checkout(self.url, self.repo_dir)
-        svn.update(self.repo_dir, self.revision)
+            await svn.checkout(self.url, self.repo_dir)
+        await svn.update(self.repo_dir, self.revision)
 
-    def extract(self):
+    async def extract(self):
         if os.path.exists(self.build_dir):
             shutil.rmtree(self.build_dir)
 

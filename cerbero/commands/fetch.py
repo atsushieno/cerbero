@@ -25,13 +25,17 @@ import shutil
 
 from cerbero.commands import Command, register_command
 from cerbero.build.cookbook import CookBook
+from cerbero.enums import LibraryType
 from cerbero.errors import FatalError
 from cerbero.packages.packagesstore import PackagesStore
-from cerbero.utils import _, N_, ArgparseArgument, remove_list_duplicates, git, shell
+from cerbero.utils import _, N_, ArgparseArgument, remove_list_duplicates, git, shell, determine_num_of_cpus, run_until_complete
 from cerbero.utils import messages as m
+from cerbero.utils.shell import BuildStatusPrinter
 from cerbero.build.source import Tarball
 from cerbero.config import Distro
 
+NUMBER_OF_JOBS_IF_UNUSED = 2
+NUMBER_OF_JOBS_IF_USED = 2 * determine_num_of_cpus()
 
 class Fetch(Command):
 
@@ -43,10 +47,12 @@ class Fetch(Command):
                     default=False, help=_('print all source URLs to stdout')))
         args.append(ArgparseArgument('--full-reset', action='store_true',
                     default=False, help=_('reset to extract step if rebuild is needed')))
+        args.append(ArgparseArgument('--jobs', '-j', action='store', nargs='?', type=int,
+                    const=NUMBER_OF_JOBS_IF_USED, default=NUMBER_OF_JOBS_IF_UNUSED, help=_('number of async jobs')))
         Command.__init__(self, args)
 
     @staticmethod
-    def fetch(cookbook, recipes, no_deps, reset_rdeps, full_reset, print_only):
+    def fetch(cookbook, recipes, no_deps, reset_rdeps, full_reset, print_only, jobs):
         fetch_recipes = []
         if not recipes:
             fetch_recipes = cookbook.get_recipes_list()
@@ -56,9 +62,20 @@ class Fetch(Command):
             for recipe in recipes:
                 fetch_recipes += cookbook.list_recipe_deps(recipe)
             fetch_recipes = remove_list_duplicates (fetch_recipes)
-        m.message(_("Fetching the following recipes: %s") %
-                  ' '.join([x.name for x in fetch_recipes]))
+        m.message(_("Fetching the following recipes using %s async job(s): %s") %
+                  (jobs, ' '.join([x.name for x in fetch_recipes])))
+        shell.set_max_non_cpu_bound_calls(jobs)
         to_rebuild = []
+        tasks = []
+        printer = BuildStatusPrinter (('fetch',), cookbook.get_config().interactive)
+        printer.total = len(fetch_recipes)
+
+        async def fetch_print_wrapper(recipe_name, stepfunc):
+            printer.update_recipe_step(printer.count, printer.total, recipe_name, 'fetch')
+            await stepfunc()
+            printer.count += 1
+            printer.remove_recipe(recipe_name)
+
         for i in range(len(fetch_recipes)):
             recipe = fetch_recipes[i]
             if print_only:
@@ -66,13 +83,14 @@ class Fetch(Command):
                 if isinstance(recipe, Tarball):
                     m.message("TARBALL: {} {}".format(recipe.url, recipe.tarball_name))
                 continue
-            m.build_step(i + 1, len(fetch_recipes), recipe, 'Fetch')
             stepfunc = getattr(recipe, 'fetch')
             if asyncio.iscoroutinefunction(stepfunc):
-                loop = asyncio.get_event_loop()
-                loop.run_until_complete(stepfunc(recipe))
+                tasks.append(fetch_print_wrapper(recipe.name, stepfunc))
             else:
+                printer.update_recipe_step(printer.count, printer.total, recipe_name, 'fetch')
                 stepfunc()
+                printer.count += 1
+                printer.remove_recipe(recipe_name)
             bv = cookbook.recipe_built_version(recipe.name)
             cv = recipe.built_version()
             if bv != cv:
@@ -82,11 +100,13 @@ class Fetch(Command):
                 if full_reset or not cookbook.recipe_needs_build(recipe.name):
                     to_rebuild.append(recipe)
                     cookbook.reset_recipe_status(recipe.name)
-                    if reset_rdeps:
+                    if recipe.library_type == LibraryType.STATIC or reset_rdeps:
                         for r in cookbook.list_recipe_reverse_deps(recipe.name):
                             to_rebuild.append(r)
                             cookbook.reset_recipe_status(r.name)
 
+        run_until_complete(tasks)
+        m.message("All async fetch jobs finished")
         if to_rebuild:
             to_rebuild = sorted(list(set(to_rebuild)), key=lambda r:r.name)
             m.message(_("These recipes have been updated and will "
@@ -111,7 +131,7 @@ class FetchRecipes(Fetch):
     def run(self, config, args):
         cookbook = CookBook(config)
         return self.fetch(cookbook, args.recipes, args.no_deps,
-                          args.reset_rdeps, args.full_reset, args.print_only)
+                          args.reset_rdeps, args.full_reset, args.print_only, args.jobs)
 
 
 class FetchPackage(Fetch):
@@ -132,7 +152,7 @@ class FetchPackage(Fetch):
         package = store.get_package(args.package[0])
         return self.fetch(store.cookbook, package.recipes_dependencies(),
                           args.deps, args.reset_rdeps, args.full_reset,
-                          args.print_only)
+                          args.print_only, args.jobs)
 
 class FetchCache(Command):
     doc = N_('Fetch a cached build from GitLab CI based on cerbero git '
@@ -172,7 +192,7 @@ class FetchCache(Command):
         tmpfile = os.path.join(tmpdir, 'deps.json')
 
         try:
-            shell.download(url, destination=tmpfile)
+            run_until_complete(shell.download(url, destination=tmpfile))
         except urllib.error.URLError as e:
             raise FatalError(_(e.reason))
 
@@ -191,6 +211,8 @@ class FetchCache(Command):
             distro = 'fedora'
         if distro == Distro.OS_X:
             distro = 'macos'
+        if config.cross_compiling():
+            distro = 'cross-' + distro
 
         base_url = self.base_url % namespace
         url = "%s/artifacts/%s/raw/cerbero-build/cerbero-deps.log" % (base_url, branch)
@@ -213,11 +235,11 @@ class FetchCache(Command):
         m.warning("Did not find cache for commit %s" % sha)
         return None
 
-    def fetch_dep(self, config, dep, namespace):
+    async def fetch_dep(self, config, dep, namespace):
         try:
             artifacts_path = "%s/cerbero-deps.tar.gz" % config.home_dir
-            shell.download(dep['url'], artifacts_path, check_cert=True, overwrite=True)
-            shell.unpack(artifacts_path, config.home_dir)
+            await shell.download(dep['url'], artifacts_path, check_cert=True, overwrite=True)
+            await shell.unpack(artifacts_path, config.home_dir)
             os.remove(artifacts_path)
             origin = self.build_dir % namespace
             m.message("Relocating from %s to %s" % (origin, config.home_dir))
@@ -243,13 +265,13 @@ class FetchCache(Command):
             raise FatalError(_("fetch-cache is only available with "
                         "cerbero-uninstalled"))
 
-        git_dir = os.path.dirname(sys.argv[0])
+        git_dir = os.path.abspath(os.path.dirname(sys.argv[0]))
         sha = git.get_hash(git_dir, args.commit)
         deps = self.get_deps(config, args)
         if not args.skip_fetch:
             dep = self.find_dep(deps, sha)
             if dep:
-                self.fetch_dep(config, dep, args.namespace)
+                run_until_complete(self.fetch_dep(config, dep, args.namespace))
         if args.job_id:
             self.update_log(config, args, deps, sha)
 

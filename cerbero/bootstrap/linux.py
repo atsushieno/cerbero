@@ -18,7 +18,7 @@
 
 from cerbero.bootstrap import BootstrapperBase
 from cerbero.bootstrap.bootstrapper import register_bootstrapper
-from cerbero.config import Platform, Architecture, Distro, DistroVersion
+from cerbero.enums import Platform, Architecture, Distro, DistroVersion
 from cerbero.errors import ConfigurationError
 from cerbero.utils import shell
 
@@ -37,7 +37,7 @@ class UnixBootstrapper (BootstrapperBase):
         BootstrapperBase.__init__(self, config, offline)
         self.assume_yes = assume_yes
 
-    def start(self):
+    def start(self, jobs=0):
         for c in self.checks:
             c()
 
@@ -49,6 +49,7 @@ class UnixBootstrapper (BootstrapperBase):
                 self.config.platform, None)
             if extra_packages:
                 self.packages += extra_packages.get(self.config.distro, [])
+                self.packages += extra_packages.get(self.config.distro_version, [])
             tool = self.tool
             if self.assume_yes:
               tool += ' ' + self.yes_arg;
@@ -62,7 +63,7 @@ class DebianBootstrapper (UnixBootstrapper):
     command = 'install %s'
     yes_arg = '-y'
     packages = ['autotools-dev', 'automake', 'autoconf', 'libtool', 'g++',
-                'autopoint', 'make', 'cmake', 'bison', 'flex', 'yasm',
+                'autopoint', 'make', 'cmake', 'bison', 'flex', 'nasm',
                 'pkg-config', 'gtk-doc-tools', 'libxv-dev', 'libx11-dev',
                 'libpulse-dev', 'python3-dev', 'texinfo', 'gettext',
                 'build-essential', 'pkg-config', 'doxygen', 'curl',
@@ -74,7 +75,7 @@ class DebianBootstrapper (UnixBootstrapper):
                 'gperf', 'libdbus-glib-1-dev', 'wget', 'glib-networking',
                 'libxtst-dev', 'libxrandr-dev', 'libglu1-mesa-dev',
                 'libegl1-mesa-dev', 'git', 'subversion', 'xutils-dev',
-                'intltool', 'ccache', 'python3-setuptools']
+                'intltool', 'ccache', 'python3-setuptools', 'libssl-dev']
 
     def __init__(self, config, offline, assume_yes):
         UnixBootstrapper.__init__(self, config, offline, assume_yes)
@@ -85,11 +86,8 @@ class DebianBootstrapper (UnixBootstrapper):
         if self.config.target_platform == Platform.LINUX:
             self.packages.append('chrpath')
             self.packages.append('libfuse-dev')
-        if self.config.distro_version in [DistroVersion.DEBIAN_SQUEEZE,
-                DistroVersion.UBUNTU_MAVERICK, DistroVersion.UBUNTU_LUCID]:
+        if self.config.distro_version == DistroVersion.DEBIAN_SQUEEZE:
             self.packages.remove('glib-networking')
-        if self.config.distro_version in [DistroVersion.UBUNTU_LUCID]:
-            self.packages.remove('autopoint')
 
     def create_debian_arch_check(self, arch):
         def check_arch():
@@ -112,7 +110,7 @@ class RedHatBootstrapper (UnixBootstrapper):
     command = 'install %s'
     yes_arg = '-y'
     packages = ['gcc', 'gcc-c++', 'automake', 'autoconf', 'libtool',
-                'gettext-devel', 'make', 'cmake', 'bison', 'flex', 'yasm',
+                'gettext-devel', 'make', 'cmake', 'bison', 'flex', 'nasm',
                 'pkgconfig', 'gtk-doc', 'curl', 'doxygen', 'texinfo',
                 'texinfo-tex', 'texlive-dvips', 'docbook-style-xsl',
                 'transfig', 'intltool', 'rpm-build', 'redhat-rpm-config',
@@ -123,7 +121,7 @@ class RedHatBootstrapper (UnixBootstrapper):
                 'docbook-utils-pdf', 'glib-networking', 'help2man',
                 'dbus-devel', 'glib2-devel', 'libXrandr-devel',
                 'libXtst-devel', 'git', 'subversion', 'xorg-x11-util-macros',
-                'mesa-libEGL-devel', 'ccache']
+                'mesa-libEGL-devel', 'ccache', 'openssl-devel']
 
     def __init__(self, config, offline, assume_yes):
         UnixBootstrapper.__init__(self, config, offline, assume_yes)
@@ -132,6 +130,10 @@ class RedHatBootstrapper (UnixBootstrapper):
             self.tool = 'yum'
         elif self.config.distro_version in [DistroVersion.REDHAT_6, DistroVersion.REDHAT_7]:
             self.tool = 'yum'
+        elif self.config.distro_version == DistroVersion.REDHAT_8:
+            self.tool = 'yum --enablerepo=PowerTools'
+            # See https://bugzilla.redhat.com/show_bug.cgi?id=1757002
+            self.packages.remove('docbook-utils-pdf')
 
         if self.config.target_platform == Platform.WINDOWS:
             if self.config.arch == Architecture.X86_64:
@@ -153,7 +155,7 @@ class OpenSuseBootstrapper (UnixBootstrapper):
     command = 'install %s'
     yes_arg = '-y'
     packages = ['gcc', 'automake', 'autoconf', 'gcc-c++', 'libtool',
-            'gettext-tools', 'make', 'cmake', 'bison', 'flex', 'yasm',
+            'gettext-tools', 'make', 'cmake', 'bison', 'flex', 'nasm',
             'gtk-doc', 'curl', 'doxygen', 'texinfo',
             'texlive', 'docbook-xsl-stylesheets',
             'transfig', 'intltool', 'patterns-openSUSE-devel_rpm_build',
@@ -162,7 +164,8 @@ class OpenSuseBootstrapper (UnixBootstrapper):
             'libX11-devel', 'alsa-devel', 'libXi-devel', 'Mesa-devel',
             'Mesa-libGLESv3-devel',
             'perl-XML-Simple', 'gperf', 'gdk-pixbuf-devel', 'wget',
-            'docbook-utils', 'glib-networking', 'git', 'subversion', 'ccache']
+            'docbook-utils', 'glib-networking', 'git', 'subversion', 'ccache',
+            'openssl-devel']
 
 class ArchBootstrapper (UnixBootstrapper):
 
@@ -171,10 +174,10 @@ class ArchBootstrapper (UnixBootstrapper):
     yes_arg = ' --noconfirm'
     packages = ['intltool', 'cmake', 'doxygen', 'gtk-doc',
             'libtool', 'bison', 'flex', 'automake', 'autoconf', 'make',
-            'curl', 'gettext', 'alsa-lib', 'yasm', 'gperf',
+            'curl', 'gettext', 'alsa-lib', 'nasm', 'gperf',
             'docbook-xsl', 'transfig', 'libxrender',
             'libxv', 'mesa', 'python3', 'wget', 'glib-networking', 'git',
-            'subversion', 'xorg-util-macros', 'ccache']
+            'subversion', 'xorg-util-macros', 'ccache', 'openssl']
 
     def __init__(self, config, offline, assume_yes):
         UnixBootstrapper.__init__(self, config, offline, assume_yes)
@@ -200,9 +203,10 @@ class GentooBootstrapper (UnixBootstrapper):
             'sys-devel/bison', 'sys-devel/flex', 'sys-devel/automake',
             'sys-devel/autoconf', 'sys-devel/make', 'net-misc/curl',
             'sys-devel/gettext', 'media-libs/alsa-lib', 'media-sound/pulseaudio',
-            'dev-lang/yasm', 'dev-util/gperf', 'app-text/docbook-xsl-stylesheets',
+            'dev-lang/nasm', 'dev-util/gperf', 'app-text/docbook-xsl-stylesheets',
             'media-gfx/transfig', 'x11-libs/libXrender', 'x11-libs/libXv',
-            'media-libs/mesa', 'net-misc/wget', 'net-libs/glib-networking']
+            'media-libs/mesa', 'net-misc/wget', 'net-libs/glib-networking',
+            'dev-libs/openssl']
 
 class NoneBootstrapper (BootstrapperBase):
 

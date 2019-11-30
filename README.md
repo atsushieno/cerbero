@@ -46,8 +46,6 @@ Despite the presence of `setup.py` this tool does not need installation. It is i
 cerbero-uninstalled script, which should be invoked as `./cerbero-uninstalled`, or you can add
 the cerbero directory in your path and invoke it as `cerbero-uninstalled`.
 
-On Windows it should be invoked as "python ./cerbero-uninstalled".
-
 ### Bootstrap
 
 Before using cerbero for the first time, you will need to run the bootstrap
@@ -218,20 +216,18 @@ On Windows, `INTELMEDIASDKROOT` automatically set by the installer. On Linux,
 if you need to set this, you must set it to point to the directory that
 contains the mediasdk `include` and `lib64` dirs.
 
+For VA-API, the [variant to enable](#enabling-optional-features-with-variants)
+is `vaapi` which will build the gstreamer-vaapi plugins with all
+options enabled if possible.
+
 ### Nvidia Hardware Codecs
 
 For Nvidia, the [variant to enable](#enabling-optional-features-with-variants)
-is `nvcodec` which will build the `nvenc` and `nvdec` plugins.
+is `nvcodec` which will build the `nvcodec` plugin.
 
 If CUDA is not installed into the system prefix, You need to set `CUDA_PATH` to
 point to your [CUDA SDK](https://developer.nvidia.com/cuda-downloads) prefix.
 On Windows, this is done automatically by the installer.
-
-On Windows, with CUDA v10 and newer, you must also set
-`NVIDIA_VIDEO_CODEC_SDK_PATH` to point to your [Video Codec
-SDK](https://developer.nvidia.com/nvidia-video-codec-sdk) prefix. There is no
-installer for this, so you must extract the SDK zip and set the env var to point
-to the path to the extracted folder.
 
 ## Enabling Visual Studio Support
 

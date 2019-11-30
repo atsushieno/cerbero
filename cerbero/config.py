@@ -40,7 +40,6 @@ DEFAULT_GIT_ROOT = 'https://gitlab.freedesktop.org/gstreamer'
 DEFAULT_ALLOW_PARALLEL_BUILD = True
 DEFAULT_PACKAGER = "Default <default@change.me>"
 CERBERO_UNINSTALLED = 'CERBERO_UNINSTALLED'
-CERBERO_PREFIX = 'CERBERO_PREFIX'
 DEFAULT_MIRRORS = ['https://gstreamer.freedesktop.org/src/mirror/']
 
 
@@ -59,7 +58,7 @@ def set_nofile_ulimit():
     '''
     try:
         import resource
-    except ModuleNotFoundError:
+    except ImportError:
         return
     want = 2048
     soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
@@ -73,8 +72,8 @@ class Variants(object):
 
     __disabled_variants = ['x11', 'alsa', 'pulse', 'cdparanoia', 'v4l2',
                            'gi', 'unwind', 'rpi', 'visualstudio', 'qt5',
-                           'intelmsdk', 'nvcodec', 'werror']
-    __enabled_variants = ['debug', 'python', 'testspackage']
+                           'intelmsdk', 'nvcodec', 'python', 'werror', 'vaapi']
+    __enabled_variants = ['debug', 'testspackage']
     __all_variants = __enabled_variants + __disabled_variants
 
     def __init__(self, variants):
@@ -125,7 +124,7 @@ class Config (object):
                    'build_tools_prefix', 'build_tools_sources',
                    'build_tools_cache', 'home_dir', 'recipes_commits',
                    'recipes_remotes', 'ios_platform', 'extra_build_tools',
-                   'distro_packages_install', 'interactive',
+                   'distro_packages_install', 'interactive', 'bash_completions',
                    'target_arch_flags', 'sysroot', 'isysroot',
                    'extra_lib_path', 'cached_sources', 'tools_prefix',
                    'ios_min_version', 'toolchain_path', 'mingw_perl_prefix',
@@ -146,14 +145,19 @@ class Config (object):
 
         self.arch_config = {self.target_arch: self}
         # Store raw os.environ data
-        self._raw_environ = os.environ.copy()
         self._pre_environ = os.environ.copy()
+        self.config_env = os.environ.copy()
 
     def _copy(self, arch):
         c = copy.deepcopy(self)
         c.target_arch = arch
-        c._raw_environ = os.environ.copy()
         return c
+
+    def _is_env_multipath_key(self, key):
+        return key in ('LD_LIBRARY_PATH', 'PATH', 'MANPATH', 'INFOPATH',
+            'PKG_CONFIG_PATH', 'PKG_CONFIG_LIBDIR', 'GI_TYPELIB_PATH',
+             'XDG_DATA_DIRS', 'XDG_CONFIG_DIRS', 'GST_PLUGIN_PATH',
+             'GST_PLUGIN_PATH_1_0', 'PYTHONPATH', 'MONO_PATH')
 
     def load(self, filename=None, variants_override=None):
         if variants_override is None:
@@ -213,10 +217,8 @@ class Config (object):
 
         # And validate properties
         self._validate_properties()
-        self._raw_environ = os.environ.copy()
 
         for config in list(self.arch_config.values()):
-            config._restore_environment()
             if self.target_arch == Architecture.UNIVERSAL:
                 config.sources = os.path.join(self.sources, config.target_arch)
                 config.prefix = os.path.join(self.prefix)
@@ -229,7 +231,6 @@ class Config (object):
             config._load_platform_config()
             config._load_last_defaults()
             config._validate_properties()
-            config._raw_environ = os.environ.copy()
 
         # Ensure that variants continue to override all other configuration
         self.variants += variants_override
@@ -256,7 +257,6 @@ class Config (object):
             self._create_path(c.logs)
 
     def do_setup_env(self):
-        self._restore_environment()
         self._create_path(self.prefix)
         self._create_path(os.path.join(self.prefix, 'share', 'aclocal'))
         self._create_path(os.path.join(
@@ -264,12 +264,8 @@ class Config (object):
 
         libdir = os.path.join(self.prefix, 'lib%s' % self.lib_suffix)
         self.libdir = libdir
-        os.environ[CERBERO_PREFIX] = self.prefix
 
         self.env = self.get_env(self.prefix, libdir, self.py_prefix)
-        # set all the variables
-        for e, v in self.env.items():
-            os.environ[e] = v
 
     @lru_cache(maxsize=None)
     def get_env(self, prefix, libdir, py_prefix):
@@ -335,11 +331,16 @@ class Config (object):
         if self.platform == Platform.LINUX:
             xdgdatadir += ":/usr/share:/usr/local/share"
 
-        ldflags = '-L%s ' % libdir
-        if ldflags not in os.environ.get('LDFLAGS', ''):
-            ldflags += os.environ.get('LDFLAGS', '')
+        ldflags = self.config_env.get('LDFLAGS', '')
+        ldflags_libdir = '-L%s ' % libdir
+        if ldflags_libdir not in ldflags:
+            # Ensure there's no leading whitespace in LDFLAGS
+            if ldflags:
+                ldflags += ' ' + ldflags_libdir
+            else:
+                ldflags = ldflags_libdir
 
-        path = os.environ.get('PATH', '')
+        path = self.config_env.get('PATH', None)
         path = self._join_path(
             os.path.join(self.build_tools_prefix, 'bin'), path)
         # Add the prefix bindir after the build-tools bindir so that on Windows
@@ -385,10 +386,35 @@ class Config (object):
                'PYTHONPATH': pythonpath,
                'MONO_PATH': os.path.join(libdir, 'mono', '4.5'),
                'MONO_GAC_PREFIX': prefix,
-               'GSTREAMER_ROOT': prefix
+               'GSTREAMER_ROOT': prefix,
+               'CERBERO_PREFIX': self.prefix,
+               'CERBERO_HOST_SOURCES': self.sources
                }
 
-        return env
+        # merge the config env with this new env
+        new_env = {}
+        for k in env.keys():
+            if k not in self.config_env:
+                new_env[k] = env[k]
+            else:
+                env_v = env[k]
+                config_v = self.config_env[k]
+                if env_v == config_v:
+                    new_env[k] = env_v
+                elif k in ('LDFLAGS', 'PATH'):
+                    # handled above
+                    new_env[k] = env_v
+                elif self._is_env_multipath_key(k):
+                    new_env[k] = self._join_path(env_v, config_v)
+                else:
+                    raise FatalError("Don't know how to combine the environment "
+                        "variable '%s' with values '%s' and '%s'" % (k, env_v, config_v))
+
+        for k in self.config_env.keys():
+            if k not in env:
+                new_env[k] = self.config_env[k]
+
+        return new_env
 
     def load_defaults(self):
         self.set_property('cache_file', None)
@@ -436,12 +462,13 @@ class Config (object):
         self.set_property('recipes_remotes', {})
         self.set_property('extra_build_tools', [])
         self.set_property('distro_packages_install', True)
-        self.set_property('interactive', shell.console_is_interactive())
+        self.set_property('interactive', m.console_is_interactive())
         self.set_property('meson_cross_properties', {})
         self.set_property('manifest', None)
         self.set_property('extra_properties', {})
         self.set_property('extra_mirrors', [])
         self.set_property('extra_bootstrap_packages', {})
+        self.set_property('bash_completions', set())
         # Increase open-files limits
         set_nofile_ulimit()
 
@@ -512,7 +539,7 @@ class Config (object):
         return self.target_distro_version >= distro_version
 
     def _parse(self, filename, reset=True):
-        config = {'os': os, '__file__': filename}
+        config = {'os': os, '__file__': filename, 'env' : self.config_env}
         if not reset:
             for prop in self._properties:
                 if hasattr(self, prop):
@@ -526,10 +553,6 @@ class Config (object):
         for key in self._properties:
             if key in config:
                 self.set_property(key, config[key], True)
-
-    def _restore_environment(self):
-        os.environ.clear()
-        os.environ.update(self._raw_environ)
 
     def _validate_properties(self):
         if not validate_packager(self.packager):

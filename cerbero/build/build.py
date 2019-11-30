@@ -21,11 +21,11 @@ import re
 import copy
 import shutil
 import shlex
-import asyncio
 import subprocess
 from pathlib import Path
 
 from cerbero.enums import Platform, Architecture, Distro, LibraryType
+from cerbero.errors import FatalError
 from cerbero.utils import shell, to_unixpath, add_system_libs
 from cerbero.utils import messages as m
 
@@ -46,44 +46,6 @@ class Build (object):
 
     def __init__(self):
         self._properties_keys = []
-
-    def setup_toolchain_env_ops(self):
-        if self.config.qt5_pkgconfigdir:
-            self.append_env('PKG_CONFIG_LIBDIR', self.config.qt5_pkgconfigdir, sep=os.pathsep)
-        if self.config.platform != Platform.WINDOWS:
-            return
-        if self.using_msvc():
-            toolchain_env = self.config.msvc_toolchain_env
-        else:
-            toolchain_env = self.config.mingw_toolchain_env
-        # Set the toolchain environment
-        for var, (val, sep) in toolchain_env.items():
-            # We prepend PATH and replace the rest
-            if var == 'PATH':
-                self.prepend_env(var, val, sep=sep)
-            else:
-                self.set_env(var, val, sep=sep)
-
-    def unset_toolchain_env(self):
-        # These toolchain env vars set by us are for GCC, so unset them if
-        # we're building with MSVC (or cross-compiling with Meson)
-        for var in ('CC', 'CXX', 'OBJC', 'OBJCXX', 'AR', 'WINDRES', 'STRIP',
-                    'CFLAGS', 'CXXFLAGS', 'CPPFLAGS', 'OBJCFLAGS', 'LDFLAGS'):
-            if var in self.env:
-                # Env vars that are edited by the recipe will be restored by
-                # @modify_environment when we return from the build step but
-                # other env vars won't be, so add those.
-                if var not in self._old_env:
-                    self._old_env[var] = self.env[var]
-                del self.env[var]
-        # Re-add *FLAGS that weren't set by the toolchain config, but instead
-        # were set in the recipe or other places via @modify_environment
-        if self.using_msvc():
-            for var in ('CFLAGS', 'CXXFLAGS', 'CPPFLAGS', 'OBJCFLAGS',
-                        'LDFLAGS', 'OBJLDFLAGS'):
-                for env_op in self._new_env:
-                    if env_op.var == var:
-                        env_op.execute(self.env)
 
     def get_env(self, var, default=None):
         if var in self.env:
@@ -110,7 +72,7 @@ class Build (object):
         '''
         raise NotImplemented("'make' must be implemented by subclasses")
 
-    def install(self):
+    async def install(self):
         '''
         Installs the module
         '''
@@ -131,7 +93,7 @@ class CustomBuild(Build):
     async def compile(self):
         pass
 
-    def install(self):
+    async def install(self):
         pass
 
 
@@ -143,8 +105,6 @@ def modify_environment(func):
     '''
     def call(*args):
         self = args[0]
-        if self.use_system_libs and self.config.allow_system_libs:
-            self._add_system_libs()
         self._modify_env()
         try:
             res = func(*args)
@@ -164,11 +124,11 @@ def async_modify_environment(func):
     '''
     async def call(*args):
         self = args[0]
-        if self.use_system_libs and self.config.allow_system_libs:
-            self._add_system_libs()
-        self._modify_env()
-        res = await func(*args)
-        self._restore_env()
+        try:
+            self._modify_env()
+            res = await func(*args)
+        finally:
+            self._restore_env()
         return res
 
     call.__name__ = func.__name__
@@ -222,7 +182,10 @@ class EnvVarOp:
             env[self.var] = self.sep.join(new)
 
     def __repr__(self):
-        return "<EnvVarOp " + self.op + " " + self.var + " with " + self.sep.join(self.vals) + ">"
+        vals = "None"
+        if self.sep:
+            vals = self.sep.join(self.vals)
+        return "<EnvVarOp " + self.op + " " + self.var + " with " + vals + ">"
 
 
 class ModifyEnvBase:
@@ -240,42 +203,80 @@ class ModifyEnvBase:
         self._env_vars = set()
         # Old environment to restore
         self._old_env = {}
-        self.env = {}
+
+        class ModifyEnvFuncWrapper(object):
+            def __init__(this, target, method):
+                this.target = target
+                this.method = method
+
+            def __call__(this, var, *vals, sep=' ', when='later'):
+                if vals == (None,):
+                    vals = None
+                op = EnvVarOp(this.method, var, vals, sep)
+                if when == 'later':
+                    this.target.check_reentrancy()
+                    this.target._env_vars.add(var)
+                    this.target._new_env.append(op)
+                elif when == 'now-with-restore':
+                    this.target._save_env_var(var)
+                    op.execute(this.target.env)
+                elif when == 'now':
+                    op.execute(this.target.env)
+                else:
+                    raise RuntimeError('Unknown when value: ' + when)
+
+            def __repr__(this):
+                return "<ModifyEnvFuncWrapper " + this.method + " for " + repr(this.target) + "  at " + str(hex(id(this))) + ">"
+
+        for i in ('append', 'prepend', 'set', 'remove'):
+            setattr(self, i + '_env', ModifyEnvFuncWrapper(self, i))
+
+    def setup_toolchain_env_ops(self):
+        if self.config.qt5_pkgconfigdir:
+            self.append_env('PKG_CONFIG_LIBDIR', self.config.qt5_pkgconfigdir, sep=os.pathsep)
+        if self.config.platform != Platform.WINDOWS:
+            return
+        if self.using_msvc():
+            toolchain_env = self.config.msvc_toolchain_env
+        else:
+            toolchain_env = self.config.mingw_toolchain_env
+        # Set the toolchain environment
+        for var, (val, sep) in toolchain_env.items():
+            # We prepend PATH and replace the rest
+            if var == 'PATH':
+                self.prepend_env(var, val, sep=sep)
+            else:
+                self.set_env(var, val, sep=sep)
+
+    def unset_toolchain_env(self):
+        # These toolchain env vars set by us are for GCC, so unset them if
+        # we're building with MSVC (or cross-compiling with Meson)
+        for var in ('CC', 'CXX', 'OBJC', 'OBJCXX', 'AR', 'WINDRES', 'STRIP',
+                    'CFLAGS', 'CXXFLAGS', 'CPPFLAGS', 'OBJCFLAGS', 'LDFLAGS'):
+            if var in self.env:
+                # Env vars that are edited by the recipe will be restored by
+                # @modify_environment when we return from the build step but
+                # other env vars won't be, so add those.
+                self.set_env (var, None, when='now-with-restore')
+
+            if self.using_msvc():
+                # Restore msvc toolchain env which should be preserved
+                for key, (val, sep) in self.config.msvc_toolchain_env.items():
+                    if var == key:
+                        self.set_env(var, val, sep=sep, when='now')
+                        break
+
+        # Re-add *FLAGS that weren't set by the toolchain config, but instead
+        # were set in the recipe or other places via @modify_environment
+        if self.using_msvc():
+            for var in ('CFLAGS', 'CXXFLAGS', 'CPPFLAGS', 'OBJCFLAGS',
+                        'LDFLAGS', 'OBJLDFLAGS'):
+                if var in self._new_env:
+                    self.append_env (var, self._new_env[var], when='now')
 
     def check_reentrancy(self):
         if self._old_env:
             raise RuntimeError('Do not modify the env inside @modify_environment, it will have no effect')
-
-    def append_env(self, var, *vals, sep=' '):
-        self.check_reentrancy()
-        self._env_vars.add(var)
-        self._new_env.append(EnvVarOp('append', var, vals, sep))
-
-    def prepend_env(self, var, *vals, sep=' '):
-        self.check_reentrancy()
-        self._env_vars.add(var)
-        self._new_env.append(EnvVarOp('prepend', var, vals, sep))
-
-    def set_env(self, var, *vals, sep=' '):
-        self.check_reentrancy()
-        self._env_vars.add(var)
-        self._new_env.append(EnvVarOp('set', var, vals, sep))
-
-    def remove_env(self, var, *vals, sep=' '):
-        '''
-        Removes a value from and environment variable.
-        eg: self.remove_env('CFLAGS', '-mthumb)
-
-        @ivar var: environment variable to modify
-        @type var: str
-        @ivar vals: values to remove
-        @type vals: list
-        @ivar sep: separator
-        @type sep: str
-        '''
-        self.check_reentrancy()
-        self._env_vars.add(var)
-        self._new_env.append(EnvVarOp('remove', var, vals, sep))
 
     def get_env(self, var, default=None):
         if not self._old_env:
@@ -291,6 +292,14 @@ class ModifyEnvBase:
 
         return default
 
+    def _save_env_var (self, var):
+        # Will only store the first 'save'.
+        if var not in self._old_env:
+            if var in self.env:
+                self._old_env[var] = self.env[var]
+            else:
+                self._old_env[var] = None
+
     def _modify_env(self):
         '''
         Modifies the build environment by inserting env vars from new_env
@@ -300,8 +309,7 @@ class ModifyEnvBase:
             return
         # Store old env
         for var in self._env_vars:
-            if var in self.env:
-                self._old_env[var] = self.env[var]
+            self._save_env_var (var)
         # Modify env
         for env_op in self._new_env:
             env_op.execute(self.env)
@@ -316,18 +324,32 @@ class ModifyEnvBase:
                 self.env[var] = val
         self._old_env.clear()
 
-    def _add_system_libs(self):
+    def maybe_add_system_libs(self, step=''):
         '''
         Add /usr/lib/pkgconfig to PKG_CONFIG_PATH so the system's .pc file
         can be found.
         '''
-        # Don't modify env again if already did it once for this function call
-        if self._old_env:
-            return
+        # Note: this is expected to be called with the environment already
+        # modified using @{async_,}modify_environment
+
+        # don't add system libs unless explicitly asked for
+        if not self.use_system_libs or not self.config.allow_system_libs:
+            return;
+
+        # this only works because add_system_libs() does very little
+        # this is a possible source of env conflicts
         new_env = {}
-        add_system_libs(self.config, new_env)
+        add_system_libs(self.config, new_env, self.env)
+
+        if step != 'configure':
+            # gobject-introspection gets the paths to internal libraries all
+            # wrong if we add system libraries during compile.  We should only
+            # need PKG_CONFIG_PATH during configure so just unset it everywhere
+            # else we will get linker errors compiling introspection binaries
+            if 'PKG_CONFIG_PATH' in new_env:
+                del new_env['PKG_CONFIG_PATH']
         for var, val in new_env.items():
-            self.set_env(var, val)
+            self.set_env(var, val, when='now-with-restore')
 
 
 class MakefilesBase (Build, ModifyEnvBase):
@@ -363,24 +385,24 @@ class MakefilesBase (Build, ModifyEnvBase):
             self.make += ' -j%d' % self.config.num_of_cpus
 
         # Make sure user's env doesn't mess up with our build.
-        self.set_env('MAKEFLAGS')
+        self.set_env('MAKEFLAGS', when='now')
         # Disable site config, which is set on openSUSE
-        self.set_env('CONFIG_SITE')
+        self.set_env('CONFIG_SITE', when='now')
         # Only add this for non-meson recipes, and only for iPhoneOS
         if self.config.ios_platform == 'iPhoneOS':
             bitcode_cflags = ['-fembed-bitcode']
             # NOTE: Can't pass -bitcode_bundle to Makefile projects because we
             # can't control what options they pass while linking dylibs
             bitcode_ldflags = bitcode_cflags #+ ['-Wl,-bitcode_bundle']
-            self.append_env('ASFLAGS', *bitcode_cflags)
-            self.append_env('CFLAGS', *bitcode_cflags)
-            self.append_env('CXXFLAGS', *bitcode_cflags)
-            self.append_env('OBJCFLAGS', *bitcode_cflags)
-            self.append_env('OBJCXXFLAGS', *bitcode_cflags)
-            self.append_env('CCASFLAGS', *bitcode_cflags)
+            self.append_env('ASFLAGS', *bitcode_cflags, when='now')
+            self.append_env('CFLAGS', *bitcode_cflags, when='now')
+            self.append_env('CXXFLAGS', *bitcode_cflags, when='now')
+            self.append_env('OBJCFLAGS', *bitcode_cflags, when='now')
+            self.append_env('OBJCXXFLAGS', *bitcode_cflags, when='now')
+            self.append_env('CCASFLAGS', *bitcode_cflags, when='now')
             # Autotools only adds LDFLAGS when doing compiler checks,
             # so add -fembed-bitcode again
-            self.append_env('LDFLAGS', *bitcode_ldflags)
+            self.append_env('LDFLAGS', *bitcode_ldflags, when='now')
 
     @async_modify_environment
     async def configure(self):
@@ -402,6 +424,8 @@ class MakefilesBase (Build, ModifyEnvBase):
             'options': self.configure_options,
             'build_dir': to_unixpath(self.build_dir)}
 
+        self.maybe_add_system_libs(step='configure')
+
         await shell.async_call(configure_cmd, self.make_dir,
                                logfile=self.logfile, env=self.env)
 
@@ -409,19 +433,23 @@ class MakefilesBase (Build, ModifyEnvBase):
     async def compile(self):
         if self.using_msvc():
             self.unset_toolchain_env()
+        self.maybe_add_system_libs(step='compile')
         await shell.async_call(self.make, self.make_dir, logfile=self.logfile, env=self.env)
 
-    @modify_environment
-    def install(self):
-        shell.call(self.make_install, self.make_dir, logfile=self.logfile, env=self.env)
+    @async_modify_environment
+    async def install(self):
+        self.maybe_add_system_libs(step='install')
+        await shell.async_call(self.make_install, self.make_dir, logfile=self.logfile, env=self.env)
 
     @modify_environment
     def clean(self):
+        self.maybe_add_system_libs(step='clean')
         shell.call(self.make_clean, self.make_dir, logfile=self.logfile, env=self.env)
 
     @modify_environment
     def check(self):
         if self.make_check:
+            self.maybe_add_system_libs(step='check')
             shell.call(self.make_check, self.build_dir, logfile=self.logfile, env=self.env)
 
 
@@ -480,7 +508,7 @@ class Autotools (MakefilesBase):
             files.remove('')
             for f in files:
                 o = os.path.join(srcdir, cf)
-                shell.log("CERBERO: copying %s to %s" % (o, f), self.logfile)
+                m.log("CERBERO: copying %s to %s" % (o, f), self.logfile)
                 shutil.copy(o, f)
 
         if self.config.platform == Platform.WINDOWS and \
@@ -527,9 +555,9 @@ class CMake (MakefilesBase):
                     '-S %(build_dir)s ' \
                     '-B %(build_dir)s ' \
                     '-DCMAKE_LIBRARY_OUTPUT_PATH=%(libdir)s ' \
-                    '-DCMAKE_INSTALL_LIBDIR=%(libdir)s ' \
-                    '-DCMAKE_INSTALL_BINDIR=%(prefix)s/bin ' \
-                    '-DCMAKE_INSTALL_INCLUDEDIR=%(prefix)s/include ' \
+                    '-DCMAKE_INSTALL_LIBDIR=lib ' \
+                    '-DCMAKE_INSTALL_BINDIR=bin ' \
+                    '-DCMAKE_INSTALL_INCLUDEDIR=include ' \
                     '%(options)s -DCMAKE_BUILD_TYPE=Release '\
                     '-DCMAKE_FIND_ROOT_PATH=$CERBERO_PREFIX '\
                     '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=true . '
@@ -752,8 +780,9 @@ class Meson (Build, ModifyEnvBase) :
         # Operate on a copy of the recipe properties to avoid accumulating args
         # from all archs when doing universal builds
         cross_properties = copy.deepcopy(self.meson_cross_properties)
-        for args in ('c_args', 'cpp_args', 'objc_args', 'c_link_args',
-                     'cpp_link_args', 'objc_link_args', 'objcpp_link_args'):
+        for args in ('c_args', 'cpp_args', 'objc_args', 'objcpp_args',
+                     'c_link_args', 'cpp_link_args', 'objc_link_args',
+                     'objcpp_link_args'):
             if args in cross_properties:
                 cross_properties[args] += locals()[args]
             else:
@@ -818,6 +847,8 @@ class Meson (Build, ModifyEnvBase) :
 
         # Explicitly enable/disable introspection, same as Autotools
         self._set_option({'introspection', 'gir'}, 'gi')
+        # Control python support using the variant
+        self._set_option({'python'}, 'python')
         # Always disable gtk-doc, same as Autotools
         self._set_option({'gtk_doc'}, None)
         # Automatically disable examples
@@ -868,22 +899,27 @@ class Meson (Build, ModifyEnvBase) :
         for (key, value) in self.meson_options.items():
             meson_cmd += ['-D%s=%s' % (key, str(value))]
 
+        self.maybe_add_system_libs(step='configure')
         await shell.async_call(meson_cmd, self.meson_dir, logfile=self.logfile, env=self.env)
 
     @async_modify_environment
     async def compile(self):
+        self.maybe_add_system_libs(step='compile')
         await shell.async_call(self.make, self.meson_dir, logfile=self.logfile, env=self.env)
 
-    @modify_environment
-    def install(self):
-        shell.call(self.make_install, self.meson_dir, logfile=self.logfile, env=self.env)
+    @async_modify_environment
+    async def install(self):
+        self.maybe_add_system_libs(step='install')
+        await shell.async_call(self.make_install, self.meson_dir, logfile=self.logfile, env=self.env)
 
     @modify_environment
     def clean(self):
+        self.maybe_add_system_libs(step='clean')
         shell.call(self.make_clean, self.meson_dir, logfile=self.logfile, env=self.env)
 
     @modify_environment
     def check(self):
+        self.maybe_add_system_libs(step='check')
         shell.call(self.make_check, self.meson_dir, logfile=self.logfile, env=self.env)
 
 

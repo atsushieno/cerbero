@@ -31,11 +31,12 @@ import glob
 import shutil
 import hashlib
 import urllib.request, urllib.error, urllib.parse
+import collections
 from pathlib import Path, PurePath
 from distutils.version import StrictVersion
 
 from cerbero.enums import Platform
-from cerbero.utils import _, system_info, to_unixpath
+from cerbero.utils import _, system_info, to_unixpath, determine_num_of_cpus, CerberoSemaphore
 from cerbero.utils import messages as m
 from cerbero.errors import FatalError
 
@@ -46,22 +47,9 @@ TARBALL_SUFFIXES = ('tar.gz', 'tgz', 'tar.bz2', 'tbz2', 'tar.xz')
 
 
 PLATFORM = system_info()[0]
+CPU_BOUND_SEMAPHORE = CerberoSemaphore(determine_num_of_cpus())
+NON_CPU_BOUND_SEMAPHORE = CerberoSemaphore(2)
 DRY_RUN = False
-
-CALL_ENV = None
-
-def console_is_interactive():
-    if not os.isatty(sys.stdout.fileno()):
-        return False
-    if os.environ.get('TERM') == 'dumb':
-        return False
-    return True
-
-def log(msg, logfile):
-    if logfile is None:
-        logging.info(msg)
-    else:
-        logfile.write(msg + '\n')
 
 def _fix_mingw_cmd(path):
     reserved = ['/', ' ', '\\', ')', '(', '"']
@@ -72,9 +60,24 @@ def _fix_mingw_cmd(path):
                 l_path[i] = '/'
     return ''.join(l_path)
 
-def _cmd_string_to_array(cmd):
-    if not isinstance(cmd, str):
+def _resolve_cmd(cmd, env):
+    '''
+    On Windows, we can't pass the PATH variable through the env= kwarg to
+    subprocess.* and expect it to use that value to search for the command,
+    because Python uses CreateProcess directly. Unlike execvpe, CreateProcess
+    does not use the PATH env var in the env supplied to search for the
+    executable. Hence, we need to search for it manually.
+    '''
+    if PLATFORM != Platform.WINDOWS or env is None or 'PATH' not in env:
         return cmd
+    if not os.path.isabs(cmd[0]):
+        cmd[0] = shutil.which(cmd[0], path=env['PATH'])
+    return cmd
+
+def _cmd_string_to_array(cmd, env):
+    if isinstance(cmd, list):
+        return _resolve_cmd(cmd, env)
+    assert(isinstance(cmd, str))
     if PLATFORM == Platform.WINDOWS:
         # fix paths with backslashes
         cmd = _fix_mingw_cmd(cmd)
@@ -83,15 +86,13 @@ def _cmd_string_to_array(cmd):
     # platforms.
     return ['sh', '-c', cmd]
 
+def set_max_cpu_bound_calls(number):
+    global CPU_BOUND_SEMAPHORE
+    CPU_BOUND_SEMAPHORE = CerberoSemaphore(number)
 
-def set_call_env(env):
-    global CALL_ENV
-    CALL_ENV = env
-
-def restore_call_env():
-    global CALL_ENV
-    CALL_ENV = None
-
+def set_max_non_cpu_bound_calls(number):
+    global NON_CPU_BOUND_SEMAPHORE
+    NON_CPU_BOUND_SEMAPHORE = CerberoSemaphore(number)
 
 def call(cmd, cmd_dir='.', fail=True, verbose=False, logfile=None, env=None):
     '''
@@ -105,7 +106,6 @@ def call(cmd, cmd_dir='.', fail=True, verbose=False, logfile=None, env=None):
     @param fail: whether or not to raise an exception if the command fails
     @type fail: bool
     '''
-    global CALL_ENV
     try:
         if logfile is None:
             if verbose:
@@ -131,9 +131,7 @@ def call(cmd, cmd_dir='.', fail=True, verbose=False, logfile=None, env=None):
             m.error("cd %s && %s && cd %s" % (cmd_dir, cmd, os.getcwd()))
             ret = 0
         else:
-            if CALL_ENV is not None:
-                env = CALL_ENV.copy()
-            elif env is not None:
+            if env is not None:
                 env = env.copy()
             else:
                 env = os.environ.copy()
@@ -157,8 +155,8 @@ def check_call(cmd, cmd_dir=None, shell=False, split=True, fail=False, env=None)
     '''
     DEPRECATED: Use check_output and a cmd array wherever possible
     '''
-    if env is None and CALL_ENV is not None:
-        env = CALL_ENV.copy()
+    if env is None:
+        env = os.environ.copy()
     if split and isinstance(cmd, str):
         cmd = shlex.split(cmd)
     try:
@@ -167,7 +165,7 @@ def check_call(cmd, cmd_dir=None, shell=False, split=True, fail=False, env=None)
                                    stderr=subprocess.STDOUT, shell=shell)
         output, unused_err = process.communicate()
         if process.poll() and fail:
-            raise Exception()
+            raise Exception(output)
     except Exception:
         raise FatalError(_("Error running command: %s") % cmd)
 
@@ -178,7 +176,7 @@ def check_call(cmd, cmd_dir=None, shell=False, split=True, fail=False, env=None)
 
 
 def check_output(cmd, cmd_dir=None, logfile=None, env=None):
-    cmd = _cmd_string_to_array(cmd)
+    cmd = _cmd_string_to_array(cmd, env)
     try:
         o = subprocess.check_output(cmd, cwd=cmd_dir, env=env, stderr=logfile)
     except (OSError, subprocess.CalledProcessError) as e:
@@ -190,7 +188,7 @@ def check_output(cmd, cmd_dir=None, logfile=None, env=None):
 
 
 def new_call(cmd, cmd_dir=None, logfile=None, env=None):
-    cmd = _cmd_string_to_array(cmd)
+    cmd = _cmd_string_to_array(cmd, env)
     if logfile:
         logfile.write('Running command {!r}\n'.format(cmd))
         logfile.flush()
@@ -201,7 +199,7 @@ def new_call(cmd, cmd_dir=None, logfile=None, env=None):
         raise FatalError('Running command: {!r}\n{}'.format(cmd, str(e)))
 
 
-async def async_call(cmd, cmd_dir='.', logfile=None, env=None):
+async def async_call(cmd, cmd_dir='.', fail=True, logfile=None, cpu_bound=True, env=None):
     '''
     Run a shell command
 
@@ -210,33 +208,39 @@ async def async_call(cmd, cmd_dir='.', logfile=None, env=None):
     @param cmd_dir: directory where the command will be run
     @param cmd_dir: str
     '''
-    cmd = _cmd_string_to_array(cmd)
+    global CPU_BOUND_SEMAPHORE, NON_CPU_BOUND_SEMAPHORE
+    semaphore = CPU_BOUND_SEMAPHORE if cpu_bound else NON_CPU_BOUND_SEMAPHORE
 
-    if logfile is None:
-        stream = None
-    else:
-        logfile.write("Running command '%s'\n" % ' '.join([shlex.quote(c) for c in cmd]))
-        logfile.flush()
-        stream = logfile
+    async with semaphore:
+        cmd = _cmd_string_to_array(cmd, env)
 
-    if DRY_RUN:
-        # write to sdterr so it's filtered more easilly
-        m.error("cd %s && %s && cd %s" % (cmd_dir, cmd, os.getcwd()))
-        return
+        if logfile is None:
+            stream = None
+        else:
+            logfile.write("Running command '%s'\n" % ' '.join([shlex.quote(c) for c in cmd]))
+            logfile.flush()
+            stream = logfile
 
-    env = os.environ.copy() if env is None else env.copy()
-    # Force python scripts to print their output on newlines instead
-    # of on exit. Ensures that we get continuous output in log files.
-    env['PYTHONUNBUFFERED'] = '1'
-    proc = await asyncio.create_subprocess_exec(*cmd, cwd=cmd_dir,
-                           stderr=subprocess.STDOUT, stdout=stream,
-                           env=env)
-    await proc.wait()
-    if proc.returncode != 0:
-        raise FatalError('Running {!r}, returncode {}'.format(cmd, proc.returncode))
+        if DRY_RUN:
+            # write to sdterr so it's filtered more easilly
+            m.error("cd %s && %s && cd %s" % (cmd_dir, cmd, os.getcwd()))
+            return
+
+        env = os.environ.copy() if env is None else env.copy()
+        # Force python scripts to print their output on newlines instead
+        # of on exit. Ensures that we get continuous output in log files.
+        env['PYTHONUNBUFFERED'] = '1'
+        proc = await asyncio.create_subprocess_exec(*cmd, cwd=cmd_dir,
+                            stderr=subprocess.STDOUT, stdout=stream,
+                            env=env)
+        await proc.wait()
+        if proc.returncode != 0 and fail:
+            raise FatalError('Running {!r}, returncode {}'.format(cmd, proc.returncode))
+
+        return proc.returncode
 
 
-async def async_call_output(cmd, cmd_dir=None, logfile=None, env=None):
+async def async_call_output(cmd, cmd_dir=None, logfile=None, cpu_bound=True, env=None):
     '''
     Run a shell command and get the output
 
@@ -245,35 +249,39 @@ async def async_call_output(cmd, cmd_dir=None, logfile=None, env=None):
     @param cmd_dir: directory where the command will be run
     @param cmd_dir: str
     '''
-    cmd = _cmd_string_to_array(cmd)
+    global CPU_BOUND_SEMAPHORE, NON_CPU_BOUND_SEMAPHORE
+    semaphore = CPU_BOUND_SEMAPHORE if cpu_bound else NON_CPU_BOUND_SEMAPHORE
 
-    if PLATFORM == Platform.WINDOWS:
-        import cerbero.hacks
-        # On Windows, create_subprocess_exec with a PIPE fails while creating
-        # a named pipe using tempfile.mktemp because we override os.path.join
-        # to use / on Windows. Override the tempfile module's reference to the
-        # original implementation, then change it back later so it doesn't leak.
-        # XXX: Get rid of this once we move to Path.as_posix() everywhere
-        tempfile._os.path.join = cerbero.hacks.oldjoin
-        # The tempdir is derived from TMP and TEMP which use / as the path
-        # separator, which fails for the same reason as above. Ensure that \ is
-        # used instead.
-        tempfile.tempdir = str(PurePath(tempfile.gettempdir()))
+    async with semaphore:
+        cmd = _cmd_string_to_array(cmd, env)
 
-    proc = await asyncio.create_subprocess_exec(*cmd, cwd=cmd_dir,
-            stdout=subprocess.PIPE, stderr=logfile, env=env)
-    (output, unused_err) = await proc.communicate()
+        if PLATFORM == Platform.WINDOWS:
+            import cerbero.hacks
+            # On Windows, create_subprocess_exec with a PIPE fails while creating
+            # a named pipe using tempfile.mktemp because we override os.path.join
+            # to use / on Windows. Override the tempfile module's reference to the
+            # original implementation, then change it back later so it doesn't leak.
+            # XXX: Get rid of this once we move to Path.as_posix() everywhere
+            tempfile._os.path.join = cerbero.hacks.oldjoin
+            # The tempdir is derived from TMP and TEMP which use / as the path
+            # separator, which fails for the same reason as above. Ensure that \ is
+            # used instead.
+            tempfile.tempdir = str(PurePath(tempfile.gettempdir()))
 
-    if PLATFORM == Platform.WINDOWS:
-        os.path.join = cerbero.hacks.join
+        proc = await asyncio.create_subprocess_exec(*cmd, cwd=cmd_dir,
+                stdout=subprocess.PIPE, stderr=logfile, env=env)
+        (output, unused_err) = await proc.communicate()
 
-    if sys.stdout.encoding:
-        output = output.decode(sys.stdout.encoding, errors='replace')
+        if PLATFORM == Platform.WINDOWS:
+            os.path.join = cerbero.hacks.join
 
-    if proc.returncode != 0:
-        raise FatalError('Running {!r}, returncode {}:\n{}'.format(cmd, proc.returncode, output))
+        if sys.stdout.encoding:
+            output = output.decode(sys.stdout.encoding, errors='replace')
 
-    return output
+        if proc.returncode != 0:
+            raise FatalError('Running {!r}, returncode {}:\n{}'.format(cmd, proc.returncode, output))
+
+        return output
 
 
 def apply_patch(patch, directory, strip=1, logfile=None):
@@ -287,11 +295,11 @@ def apply_patch(patch, directory, strip=1, logfile=None):
     @param strip: strip
     @type strip: int
     '''
-    log("Applying patch {}".format(patch), logfile)
+    m.log("Applying patch {}".format(patch), logfile)
     call('%s -p%s -f -i %s' % (PATCH, strip, patch), directory)
 
 
-def unpack(filepath, output_dir, logfile=None):
+async def unpack(filepath, output_dir, logfile=None):
     '''
     Extracts a tarball
 
@@ -300,7 +308,7 @@ def unpack(filepath, output_dir, logfile=None):
     @param output_dir: output directory
     @type output_dir: str
     '''
-    log('Unpacking {} in {}'.format(filepath, output_dir), logfile)
+    m.log('Unpacking {} in {}'.format(filepath, output_dir), logfile)
 
     # Recent versions of tar are much faster than the tarfile module, but we
     # can't use tar on Windows because MSYS tar is ancient and buggy.
@@ -308,7 +316,7 @@ def unpack(filepath, output_dir, logfile=None):
         if PLATFORM != Platform.WINDOWS:
             if not os.path.exists(output_dir):
                 os.makedirs(output_dir)
-            new_call(['tar', '-C', output_dir, '-xf', filepath])
+            await async_call(['tar', '-C', output_dir, '-xf', filepath])
         else:
             cmode = 'bz2' if filepath.endswith('bz2') else filepath[-2:]
             tf = tarfile.open(filepath, mode='r:' + cmode)
@@ -319,7 +327,7 @@ def unpack(filepath, output_dir, logfile=None):
     else:
         raise FatalError("Unknown tarball format %s" % filepath)
 
-def download_wget(url, destination=None, check_cert=True, overwrite=False):
+async def download_wget(url, destination=None, check_cert=True, overwrite=False):
     '''
     Downloads a file with wget
 
@@ -337,17 +345,17 @@ def download_wget(url, destination=None, check_cert=True, overwrite=False):
         cmd += " --no-check-certificate"
 
     cmd += " --tries=2"
-    cmd += " --timeout=10.0"
+    cmd += " --timeout=20.0"
     cmd += " --progress=dot:giga"
 
     try:
-        call(cmd, path)
+        await async_call(cmd, path, cpu_bound=False)
     except FatalError as e:
         if os.path.exists(destination):
             os.remove(destination)
         raise e
 
-def download_urllib2(url, destination=None, check_cert=True, overwrite=False):
+async def download_urllib2(url, destination=None, check_cert=True, overwrite=False):
     '''
     Download a file with urllib2, which does not rely on external programs
 
@@ -376,7 +384,7 @@ def download_urllib2(url, destination=None, check_cert=True, overwrite=False):
             os.remove(destination)
         raise e
 
-def download_curl(url, destination=None, check_cert=True, overwrite=False):
+async def download_curl(url, destination=None, check_cert=True, overwrite=False):
     '''
     Downloads a file with cURL
 
@@ -394,13 +402,13 @@ def download_curl(url, destination=None, check_cert=True, overwrite=False):
     else:
         cmd += "-O %s " % url
     try:
-        call(cmd, path)
+        await async_call(cmd, path, cpu_bound=False)
     except FatalError as e:
         if os.path.exists(destination):
             os.remove(destination)
         raise e
 
-def download(url, destination=None, check_cert=True, overwrite=False, logfile=None, mirrors=None):
+async def download(url, destination=None, check_cert=True, overwrite=False, logfile=None, mirrors=None):
     '''
     Downloads a file
 
@@ -424,7 +432,7 @@ def download(url, destination=None, check_cert=True, overwrite=False, logfile=No
     else:
         if not os.path.exists(os.path.dirname(destination)):
             os.makedirs(os.path.dirname(destination))
-        log("Downloading {}".format(url), logfile)
+        m.log("Downloading {}".format(url), logfile)
 
     urls = [url]
     if mirrors is not None:
@@ -450,7 +458,7 @@ def download(url, destination=None, check_cert=True, overwrite=False, logfile=No
     errors = []
     for murl in urls:
         try:
-            return download_func(murl, destination, check_cert, overwrite)
+            return await download_func(murl, destination, check_cert, overwrite)
         except Exception as ex:
             errors.append(ex)
     if len(errors) == 1:
@@ -574,16 +582,21 @@ def files_checksum(paths):
     return m.digest()
 
 
-def enter_build_environment(platform, arch, sourcedir=None):
+def enter_build_environment(platform, arch, sourcedir=None, bash_completions=None, env=None):
     '''
     Enters to a new shell with the build environment
     '''
-    BASHRC =  '''
-if [ -e ~/.bashrc ]; then
-source ~/.bashrc
+    SHELLRC =  '''
+if [ -e ~/{rc_file} ]; then
+source ~/{rc_file}
 fi
-%s
-PS1='\[\033[01;32m\][cerbero-%s-%s]\[\033[00m\]%s'
+{sourcedirsh}
+{prompt}
+BASH_COMPLETION_SCRIPTS="{bash_completions}"
+BASH_COMPLETION_PATH="$CERBERO_PREFIX/share/bash-completion/completions"
+for f in $BASH_COMPLETION_SCRIPTS; do
+  [ -f "$BASH_COMPLETION_PATH/$f" ] && . "$BASH_COMPLETION_PATH/$f"
+done
 '''
     MSYSBAT =  '''
 start bash.exe --rcfile %s
@@ -592,8 +605,27 @@ start bash.exe --rcfile %s
         sourcedirsh = 'cd ' + sourcedir
     else:
         sourcedirsh = ''
+    if bash_completions is None:
+        bash_completions = set()
+    bash_completions = ' '.join(bash_completions)
 
-    ps1 = os.environ.get('PS1', '')
+    env = os.environ.copy() if env is None else env
+
+    shell = os.environ.get('SHELL', '/bin/bash')
+    if 'zsh' in shell:
+        rc_file = '.zshrc'
+        rc_opt = '--rcs'
+        prompt = os.environ.get('PROMPT', '')
+        prompt = 'PROMPT="%{{$fg[green]%}}[cerbero-{platform}-{arch}]%{{$reset_color%}} $PROMPT"'.format(
+            platform=platform, arch=arch)
+    else:
+        rc_file = '.bashrc'
+        rc_opt = '--rcfile'
+        prompt = os.environ.get('PS1', '')
+        prompt = 'PS1="\[\033[01;32m\][cerbero-{platform}-{arch}]\[\033[00m\] $PS1"'.format(
+            platform=platform, arch=arch)
+    shellrc = SHELLRC.format(rc_file=rc_file, sourcedirsh=sourcedirsh,
+        prompt=prompt, bash_completions=bash_completions)
 
     if PLATFORM == Platform.WINDOWS:
         msysbatdir = tempfile.mkdtemp()
@@ -602,21 +634,26 @@ start bash.exe --rcfile %s
         with open(msysbat, 'w+') as f:
             f.write(MSYSBAT % bashrc)
         with open(bashrc, 'w+') as f:
-            f.write(BASHRC % (sourcedirsh, platform, arch, ps1))
-        subprocess.check_call(msysbat, shell=True)
+            f.write(shellrc)
+        subprocess.check_call(msysbat, shell=True, env=env)
         # We should remove the temporary directory
         # but there is a race with the bash process
     else:
-        bashrc = tempfile.NamedTemporaryFile()
-        bashrc.write((BASHRC % (sourcedirsh, platform, arch, ps1)).encode())
-        bashrc.flush()
-        shell = os.environ.get('SHELL', '/bin/bash')
-        if os.system("%s --rcfile %s -c echo 'test' > /dev/null 2>&1" % (shell, bashrc.name)) == 0:
-            os.execlp(shell, shell, '--rcfile', bashrc.name)
+        tmp = tempfile.TemporaryDirectory()
+        rc_tmp = open(os.path.join(tmp.name, rc_file), 'w+')
+        rc_tmp.write(shellrc)
+        rc_tmp.flush()
+        if 'zsh' in shell:
+            env["ZDOTDIR"] = tmp.name
+            os.execlpe(shell, shell, env)
         else:
-            os.environ["CERBERO_ENV"] = "[cerbero-%s-%s]" % (platform, arch)
-            os.execlp(shell, shell)
-        bashrc.close()
+            # Check if the shell supports passing the rcfile
+            if os.system("%s %s %s -c echo 'test' > /dev/null 2>&1" % (shell, rc_opt, rc_tmp.name)) == 0:
+                os.execlpe(shell, shell, rc_opt, rc_tmp.name, env)
+            else:
+                env["CERBERO_ENV"] = "[cerbero-%s-%s]" % (platform, arch)
+                os.execlpe(shell, shell, env)
+        tmp.close()
 
 
 def which(pgm, path=None):
@@ -663,3 +700,58 @@ def windows_proof_rename(from_name, to_name):
                 continue
     # Try one last time and throw an error if it fails again
     os.rename(from_name, to_name)
+
+
+class BuildStatusPrinter:
+    def __init__(self, steps, interactive):
+        self.steps = steps[:]
+        self.step_to_recipe = collections.defaultdict(list)
+        self.recipe_to_step = {}
+        self.total = 0
+        self.count = 0
+        self.interactive = interactive
+        # FIXME: Default MSYS shell doesn't handle ANSI escape sequences correctly
+        if os.environ.get('TERM') == 'cygwin':
+            m.message('Running under MSYS: reverting to basic build status output')
+            self.interactive = False
+
+    def remove_recipe(self, recipe_name):
+        if recipe_name in self.recipe_to_step:
+            self.step_to_recipe[self.recipe_to_step[recipe_name]].remove(recipe_name)
+            del self.recipe_to_step[recipe_name]
+        self.output_status_line()
+
+    def built(self, count, total, recipe_name):
+        self.count += 1
+        if self.interactive:
+            m.build_step(self.count, self.total, recipe_name, _("built"))
+        self.remove_recipe(recipe_name)
+
+    def already_built(self, count, total, recipe_name):
+        self.count += 1
+        if self.interactive:
+            m.build_step(self.count, self.total, recipe_name, _("already built"))
+        else:
+            m.build_step(count, total, recipe_name, _("already built"))
+        self.output_status_line()
+
+    def update_recipe_step(self, count, total, recipe_name, step):
+        if not self.interactive:
+            m.build_step(count, total, recipe_name, step)
+            return
+        self.remove_recipe(recipe_name)
+        self.step_to_recipe[step].append(recipe_name)
+        self.recipe_to_step[recipe_name] = step
+        self.output_status_line()
+
+    def generate_status_line(self):
+        s = "[(" + str(self.count) + "/" + str(self.total) + ")"
+        for step in self.steps:
+            if self.step_to_recipe[step]:
+                s += " " + str(step).upper() + ": " + ", ".join(self.step_to_recipe[step])
+        s += "]"
+        return s
+
+    def output_status_line(self):
+        if self.interactive:
+            m.output_status(self.generate_status_line())

@@ -126,7 +126,7 @@ class OSXPackage(PackagerBase, FrameworkHeadersMixin):
         self.install_dir = install_dir or self.package.get_install_dir()
         self.version = version or self.package.version
         self.sdk_version = sdk_version or self.version
-        self.include_dirs = include_dirs or PkgConfig.list_all_include_dirs()
+        self.include_dirs = include_dirs or PkgConfig.list_all_include_dirs(env=self.config.env)
 
         # create the runtime package
         try:
@@ -255,7 +255,7 @@ class ProductPackage(PackagerBase):
         return paths
 
     def _prepare_pack(self):
-        self.include_dirs = PkgConfig.list_all_include_dirs()
+        self.include_dirs = PkgConfig.list_all_include_dirs(env=self.config.env)
         self.tmp = tempfile.mkdtemp()
         self.fw_path = self.tmp
 
@@ -534,7 +534,10 @@ class IOSPackage(ProductPackage, FrameworkHeadersMixin):
             out_dir = os.path.split(out_path)[0]
             if not os.path.exists(out_dir):
                 os.makedirs(out_dir)
-            shutil.copy(f, out_path)
+            if os.path.isdir(f):
+                shell.copy_dir (f, out_path)
+            else:
+                shutil.copy(f, out_path)
 
     def _copy_templates(self, files):
         templates_prefix = 'share/xcode/templates/ios'
@@ -571,8 +574,8 @@ class IOSPackage(ProductPackage, FrameworkHeadersMixin):
         # Get the list of static libraries
         static_files = [x for x in files if x.endswith('.a')]
 
-        fwlib = StaticFrameworkLibrary(libname, libname, static_files,
-            self.config.target_arch)
+        fwlib = StaticFrameworkLibrary(self.config.ios_min_version, self.config.target_distro,
+            libname, libname, static_files, self.config.target_arch, env=self.config.env)
         fwlib.use_pkgconfig = False
         if self.config.target_arch == Architecture.UNIVERSAL:
             fwlib.universal_archs = self.config.universal_archs

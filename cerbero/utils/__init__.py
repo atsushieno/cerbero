@@ -31,7 +31,9 @@ from distutils.version import StrictVersion
 import gettext
 import platform as pplatform
 import re
+import asyncio
 from pathlib import Path
+from collections.abc import Iterable
 
 from cerbero.enums import Platform, Architecture, Distro, DistroVersion
 from cerbero.errors import FatalError
@@ -57,7 +59,7 @@ def user_is_root():
 
 
 def determine_num_of_cpus():
-    ''' Number of virtual or physical CPUs on this system '''
+    ''' Number of virtual or logical CPUs on this system '''
 
     # Python 2.6+
     try:
@@ -206,12 +208,14 @@ def system_info():
                 distro_version = DistroVersion.UBUNTU_XENIAL
             elif d[2] in ['artful']:
                 distro_version = DistroVersion.UBUNTU_ARTFUL
-            elif d[2] in ['bionic', 'tara', 'tessa']:
+            elif d[2] in ['bionic', 'tara', 'tessa', 'tina']:
                 distro_version = DistroVersion.UBUNTU_BIONIC
             elif d[2] in ['cosmic']:
                 distro_version = DistroVersion.UBUNTU_COSMIC
             elif d[2] in ['disco']:
                 distro_version = DistroVersion.UBUNTU_DISCO
+            elif d[2] in ['eoan']:
+                distro_version = DistroVersion.UBUNTU_EOAN
             elif d[1].startswith('6.'):
                 distro_version = DistroVersion.DEBIAN_SQUEEZE
             elif d[1].startswith('7.') or d[1].startswith('wheezy'):
@@ -222,6 +226,8 @@ def system_info():
                 distro_version = DistroVersion.DEBIAN_STRETCH
             elif d[1].startswith('10.') or d[1].startswith('buster'):
                 distro_version = DistroVersion.DEBIAN_BUSTER
+            elif d[1].startswith('11.') or d[1].startswith('bullseye'):
+                distro_version = DistroVersion.DEBIAN_BULLSEYE
             else:
                 raise FatalError("Distribution '%s' not supported" % str(d))
         elif d[0] in ['RedHat', 'Fedora', 'CentOS', 'Red Hat Enterprise Linux Server', 'CentOS Linux']:
@@ -256,10 +262,14 @@ def system_info():
                 distro_version = DistroVersion.FEDORA_29
             elif d[1] == '30':
                 distro_version = DistroVersion.FEDORA_30
+            elif d[1] == '31':
+                distro_version = DistroVersion.FEDORA_31
             elif d[1].startswith('6.'):
                 distro_version = DistroVersion.REDHAT_6
             elif d[1].startswith('7.'):
                 distro_version = DistroVersion.REDHAT_7
+            elif d[1].startswith('8.'):
+                distro_version = DistroVersion.REDHAT_8
             elif d[1] == 'amazon':
                 distro_version = DistroVersion.AMAZON_LINUX
             else:
@@ -304,7 +314,9 @@ def system_info():
     elif platform == Platform.DARWIN:
         distro = Distro.OS_X
         ver = pplatform.mac_ver()[0]
-        if ver.startswith('10.14'):
+        if ver.startswith('10.15'):
+            distro_version = DistroVersion.OS_X_CATALINA
+        elif ver.startswith('10.14'):
             distro_version = DistroVersion.OS_X_MOJAVE
         elif ver.startswith('10.13'):
             distro_version = DistroVersion.OS_X_HIGH_SIERRA
@@ -333,7 +345,7 @@ def validate_packager(packager):
     return bool(re.match(expr, packager))
 
 
-def copy_files(origdir, destdir, files, extensions, target_platform):
+def copy_files(origdir, destdir, files, extensions, target_platform, logfile=None):
     for f in files:
         f = f % extensions
         install_dir = os.path.dirname(os.path.join(destdir, f))
@@ -346,7 +358,7 @@ def copy_files(origdir, destdir, files, extensions, target_platform):
             relprefix = destdir[1:]
         orig = os.path.join(origdir, relprefix, f)
         dest = os.path.join(destdir, f)
-        m.action("copying %s to %s" % (orig, dest))
+        m.action("copying %s to %s" % (orig, dest), logfile=logfile)
         try:
             shutil.copy(orig, dest)
         except IOError:
@@ -389,7 +401,7 @@ def get_wix_prefix():
         raise FatalError("The required packaging tool 'WiX' was not found")
     return escape_path(to_unixpath(wix_prefix))
 
-def add_system_libs(config, new_env):
+def add_system_libs(config, new_env, old_env=None):
     '''
     Add /usr/lib/pkgconfig to PKG_CONFIG_PATH so the system's .pc file
     can be found.
@@ -405,7 +417,15 @@ def add_system_libs(config, new_env):
     if config.sysroot:
         sysroot = config.sysroot
 
-    search_paths = [os.environ['PKG_CONFIG_LIBDIR'],
+    if not old_env:
+        old_env = os.environ
+
+    search_paths = []
+    if old_env.get('PKG_CONFIG_LIBDIR', None):
+       search_paths += [old_env['PKG_CONFIG_LIBDIR']]
+    if old_env.get('PKG_CONFIG_PATH', None):
+       search_paths += [old_env['PKG_CONFIG_PATH']]
+    search_paths += [
         os.path.join(sysroot, 'usr', libdir, 'pkgconfig'),
         os.path.join(sysroot, 'usr/share/pkgconfig')]
 
@@ -507,3 +527,74 @@ def detect_qt5(platform, arch, is_universal):
     if ret == (None, None):
         m.warning('Unsupported arch {!r} on platform {!r}'.format(arch, platform))
     return ret
+
+# asyncio.Semaphore classes set their working event loop internally on
+# creation, so we need to ensure the proper loop has already been set by then.
+# This is especially important if we create global semaphores that are
+# initialized at the very beginning, since on Windows, the default
+# SelectorEventLoop is not available.
+def CerberoSemaphore(value=1):
+    get_event_loop() # this ensures the proper event loop is already created
+    return asyncio.Semaphore(value)
+
+def get_event_loop():
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    # On Windows the default SelectorEventLoop is not available:
+    # https://docs.python.org/3.5/library/asyncio-subprocess.html#windows-event-loop
+    if sys.platform == 'win32' and \
+       not isinstance(loop, asyncio.ProactorEventLoop):
+        loop = asyncio.ProactorEventLoop()
+        asyncio.set_event_loop(loop)
+
+    return loop
+
+def run_until_complete(tasks):
+    loop = get_event_loop()
+
+    if isinstance(tasks, Iterable):
+        loop.run_until_complete(asyncio.gather(*tasks))
+    else:
+        loop.run_until_complete(tasks)
+
+async def run_tasks(tasks, done_async=None):
+    """
+    Runs @tasks until completion or until @done_async returns
+    """
+    class QueueDone(Exception):
+        pass
+
+    if done_async:
+        async def queue_done():
+            # This is how we exit the asyncio.wait once everything is done
+            # as otherwise asyncio.wait will wait for our tasks to complete
+            await done_async
+            raise QueueDone()
+
+        task = asyncio.ensure_future (queue_done())
+        tasks.append(task)
+
+    async def shutdown():
+        [task.cancel() for task in tasks]
+        ret = await asyncio.gather(*tasks, return_exceptions=True)
+        # we want to find any actual exception rather than one
+        # that may be returned from task.cancel()
+        for e in ret:
+            if isinstance(e, Exception) \
+               and not isinstance(e, asyncio.CancelledError) \
+               and not isinstance(e, QueueDone):
+                raise e
+
+    try:
+        await asyncio.gather(*tasks, return_exceptions=False)
+    except asyncio.CancelledError:
+        pass
+    except QueueDone:
+        await shutdown()
+    except Exception:
+        await shutdown()
+        raise

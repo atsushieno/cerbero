@@ -26,7 +26,7 @@ import asyncio
 from functools import reduce
 from pathlib import Path
 
-from cerbero.enums import LicenseDescription, LibraryType
+from cerbero.enums import License, LicenseDescription, LibraryType
 from cerbero.build import build, source
 from cerbero.build.filesprovider import FilesProvider, UniversalFilesProvider, UniversalFlatFilesProvider
 from cerbero.config import Platform
@@ -35,40 +35,60 @@ from cerbero.ide.vs.genlib import GenLib, GenGnuLib
 from cerbero.tools.osxuniversalgenerator import OSXUniversalGenerator
 from cerbero.tools.osxrelocator import OSXRelocator
 from cerbero.utils import N_, _
-from cerbero.utils import shell, add_system_libs
+from cerbero.utils import shell, add_system_libs, run_tasks
 from cerbero.utils import messages as m
 from cerbero.tools.libtool import LibtoolLibrary
 
 LICENSE_INFO_FILENAME = 'README-LICENSE-INFO.txt'
 
 
-def log_step_output(stepfunc):
-    async def wrapped(self):
+def log_step_output(recipe, stepfunc):
+    def open_file():
         step = stepfunc.__name__
-        path = "%s/%s-%s.log" % (self.config.logs, self.name, step)
-        old_logfile = self.logfile # Allow calling build steps recursively
-        self.logfile = open(path, 'w+')
-        try:
-            ret = stepfunc()
-            if asyncio.iscoroutine(ret):
-                await ret
-        except FatalError:
-            # Dump contents of log file on error
-            self.logfile.seek(0)
-            while True:
-                data = self.logfile.read()
-                if data:
-                    print(data)
-                else:
-                    break
-            raise
+        path = "%s/%s-%s.log" % (recipe.config.logs, recipe.name, step)
+        recipe.old_logfile = recipe.logfile # Allow calling build steps recursively
+        recipe.logfile = open(path, 'w+')
+
+    def close_file():
         # if logfile is empty, remove it
-        pos = self.logfile.tell()
-        self.logfile.close()
+        pos = recipe.logfile.tell()
+        recipe.logfile.close()
         if pos == 0:
-            os.remove(self.logfile.name)
-        self.logfile = old_logfile
-    return wrapped
+            os.remove(recipe.logfile.name)
+        recipe.logfile = recipe.old_logfile
+
+    def handle_exception():
+        # Dump contents of log file on error
+        recipe.logfile.seek(0)
+        while True:
+            data = recipe.logfile.read()
+            if data:
+                print(data)
+            else:
+                break
+
+    def wrapped():
+        open_file()
+        try:
+            stepfunc()
+        except FatalError:
+            handle_exception()
+            raise
+        close_file()
+
+    async def async_wrapped():
+        open_file()
+        try:
+            await stepfunc()
+        except FatalError:
+            handle_exception()
+            raise
+        close_file()
+
+    if asyncio.iscoroutinefunction(stepfunc):
+        return async_wrapped
+    else:
+        return wrapped
 
 class MetaRecipe(type):
     ''' This metaclass modifies the base classes of a Receipt, adding 2 new
@@ -115,6 +135,7 @@ class BuildSteps(object):
     GEN_LIBFILES = (N_('Gen Library File'), 'gen_library_file')
     MERGE = (N_('Merge universal binaries'), 'merge')
     RELOCATE_OSX_LIBRARIES = (N_('Relocate OSX libraries'), 'relocate_osx_libraries')
+    CODE_SIGN = (N_('Codesign build-tools'), 'code_sign')
 
     def __new__(cls):
         return [BuildSteps.FETCH, BuildSteps.EXTRACT,
@@ -150,6 +171,8 @@ class Recipe(FilesProvider, metaclass=MetaRecipe):
     @type platform_deps: dict
     @cvar runtime_dep: runtime dep common to all recipes
     @type runtime_dep: bool
+    @cvar bash_completions: list of bash completion scripts for shell
+    @type bash_completions: list
     '''
 
     # Licenses are declared as an array of License.enums or dicts of the type:
@@ -193,6 +216,7 @@ class Recipe(FilesProvider, metaclass=MetaRecipe):
     deps = None
     platform_deps = None
     runtime_dep = False
+    bash_completions = None
 
     # Internal properties
     force = False
@@ -206,7 +230,7 @@ SOFTWARE LICENSE COMPLIANCE.\n\n'''
     # Used in recipes/custom.py. See also: cookbook.py:_load_recipes_from_dir()
     _using_manifest_force_git = False
 
-    def __init__(self, config):
+    def __init__(self, config, env):
         self.config = config
         if self.package_name is None:
             self.package_name = "%s-%s" % (self.name, self.version)
@@ -217,12 +241,19 @@ SOFTWARE LICENSE COMPLIANCE.\n\n'''
         self.build_dir = os.path.join(self.config.sources, self.package_name)
         self.build_dir = os.path.abspath(self.build_dir)
         self.deps = self.deps or []
+        self.env = env.copy()
+        if self.bash_completions and config.target_platform in [Platform.LINUX]:
+            config.bash_completions.update(self.bash_completions)
+            self.deps.append('bash-completion')
         self.platform_deps = self.platform_deps or {}
         self._steps = self._default_steps[:]
         if self.config.target_platform == Platform.WINDOWS:
             self._steps.append(BuildSteps.GEN_LIBFILES)
         if self.config.target_platform == Platform.DARWIN:
             self._steps.append(BuildSteps.RELOCATE_OSX_LIBRARIES)
+        if self.config.target_platform == Platform.DARWIN and \
+                self.config.prefix == self.config.build_tools_prefix:
+            self._steps.append(BuildSteps.CODE_SIGN)
         FilesProvider.__init__(self, config)
         try:
             self.stype.__init__(self)
@@ -245,10 +276,10 @@ SOFTWARE LICENSE COMPLIANCE.\n\n'''
         for each build step for this recipe
         '''
         steps = BuildSteps.all_names()
-        for name, m in inspect.getmembers(self, inspect.ismethod):
+        for name, func in inspect.getmembers(self, inspect.ismethod):
             if name not in steps:
                 continue
-            setattr(self, name, log_step_output(m))
+            setattr(self, name, log_step_output(self, func))
 
     def prepare(self):
         '''
@@ -267,7 +298,7 @@ SOFTWARE LICENSE COMPLIANCE.\n\n'''
         return [x for x in elems if x not in used and (used.append(x) or True)]
 
     def _get_la_deps_from_pc (self, laname, pcname, env):
-        ret = shell.check_call('pkg-config --libs-only-l --static ' + pcname, env=env)
+        ret = shell.check_output(['pkg-config', '--libs-only-l', '--static', pcname], env=env, logfile=self.logfile)
         # Don't add the library itself to the list of dependencies
         return ['lib' + lib[2:] for lib in self._get_unique_ordered(ret.split()) if lib[2:] != laname[3:]]
 
@@ -353,7 +384,7 @@ SOFTWARE LICENSE COMPLIANCE.\n\n'''
         env = self.env.copy()
         env['PKG_CONFIG_LIBDIR'] += os.pathsep + pluginpcdir
         if self.use_system_libs:
-            add_system_libs(self.config, env)
+            add_system_libs(self.config, env, self.env)
 
         # retrieve the list of files we need to generate
         for f in self.devel_files_list():
@@ -439,6 +470,20 @@ SOFTWARE LICENSE COMPLIANCE.\n\n'''
                 if file_is_relocatable(x)]):
             relocator.relocate_file(f)
 
+    def code_sign(self):
+        '''
+        Codesign OSX build-tools binaries
+        '''
+        def get_real_path(fp):
+            return os.path.realpath(os.path.join(self.config.prefix, fp))
+
+        def file_is_bin(fp):
+            return fp.split('/')[0] in ['bin']
+
+        for f in set([get_real_path(x) for x in self.files_list() \
+                if file_is_bin(x)]):
+            shell.call('codesign -f -s - ' + f, logfile=self.logfile, env=self.env)
+
     def _install_srcdir_license(self, lfiles, install_dir):
         '''
         Copy specific licenses from the project's source dir. Used for BSD,
@@ -453,7 +498,10 @@ SOFTWARE LICENSE COMPLIANCE.\n\n'''
                                    .format(self.name, LICENSE_INFO_FILENAME))
             dest = str(install_dir / fname)
             src = os.path.join(self.build_dir, f)
-            shutil.copyfile(src, dest)
+            if shell.DRY_RUN:
+                print('Copying {!r} to {!r}'.format(src, dest))
+            else:
+                shutil.copyfile(src, dest)
             files.append(fname)
         return files
 
@@ -461,13 +509,21 @@ SOFTWARE LICENSE COMPLIANCE.\n\n'''
         '''
         Copy generic licenses from the cerbero licenses datadir.
         '''
+        if lobj == License.Proprietary:
+            # No license file needed, binaries will not be publicly redistributed
+            return []
         if lobj.acronym.startswith(('BSD', 'MIT')):
-            raise RuntimeError('{}.recipe: must specify the license file for BSD and MIT licenses'
-                               .format(self.name))
+            msg = '{}.recipe: must specify the license file for BSD and MIT licenses ' \
+                'using a dict of the form: ' \
+                "{License.enum: ['path-to-license-file-in-source-tree']}"
+            raise RuntimeError(msg.format(self.name))
         fname = lobj.acronym + '.txt'
         dest = str(install_dir / fname)
         src = os.path.join(self.config.data_dir, 'licenses', lobj.acronym + '.txt')
-        shutil.copyfile(src, dest)
+        if shell.DRY_RUN:
+            print('Copying {!r} to {!r}'.format(src, dest))
+        else:
+            shutil.copyfile(src, dest)
         return [fname]
 
     def _write_license_readme(self, licenses_files, install_dir, applies_to):
@@ -606,7 +662,7 @@ SOFTWARE LICENSE COMPLIANCE.\n\n'''
                                       'lib' + self.config.lib_suffix)
         # Generate a GNU import library or an MSVC import library
         genlibcls = GenGnuLib if self.using_msvc() else GenLib
-        genlib = genlibcls(self.logfile)
+        genlib = genlibcls(self.config, self.logfile)
         # Generate the .dll.a or .lib file as needed
         for (libname, dllpaths) in list(self.libraries().items()):
             if len(dllpaths) > 1:
@@ -684,7 +740,11 @@ class MetaUniversalRecipe(type):
     def __init__(cls, name, bases, ns):
         step_func = ns.get('_do_step')
         for _, step in BuildSteps():
-            setattr(cls, step, lambda self, name=step: step_func(self, name))
+            async def doit(recipe, step_name=step):
+                ret = step_func(recipe, step_name)
+                if asyncio.iscoroutine(ret):
+                    await ret
+            setattr(cls, step, doit)
 
 
 class BaseUniversalRecipe(object, metaclass=MetaUniversalRecipe):
@@ -734,11 +794,20 @@ class BaseUniversalRecipe(object, metaclass=MetaUniversalRecipe):
             for o in self._recipes.values():
                 setattr(o, name, value)
 
-    async def _run_step(self, recipe, step, arch):
+    async def _async_run_step(self, recipe, step, arch):
         # Call the step function
         stepfunc = getattr(recipe, step)
         try:
-            await stepfunc(recipe)
+            await stepfunc()
+        except FatalError as e:
+            e.arch = arch
+            raise e
+
+    def _run_step(self, recipe, step, arch):
+        # Call the step function
+        stepfunc = getattr(recipe, step)
+        try:
+            stepfunc()
         except FatalError as e:
             e.arch = arch
             raise e
@@ -765,17 +834,24 @@ class UniversalRecipe(BaseUniversalRecipe, UniversalFilesProvider):
             return []
         return self._proxy_recipe.steps[:]
 
-    def _do_step(self, step):
-        loop = asyncio.get_event_loop()
-        if step in BuildSteps.FETCH:
+    async def _do_step(self, step):
+        if step == BuildSteps.FETCH[1]:
             arch, recipe = list(self._recipes.items())[0]
-            loop.run_until_complete(self._run_step(recipe, step, arch))
+            await self._async_run_step(recipe, step, arch)
             return
 
         tasks = []
         for arch, recipe in self._recipes.items():
-            tasks.append(self._run_step(recipe, step, arch))
-        loop.run_until_complete(asyncio.gather(*tasks))
+            stepfunc = getattr(recipe, step)
+            if asyncio.iscoroutinefunction(stepfunc):
+                if step in (BuildSteps.EXTRACT[1], BuildSteps.CONFIGURE[1]):
+                    tasks.append(asyncio.ensure_future(self._async_run_step(recipe, step, arch)))
+                else:
+                    await self._async_run_step(recipe, step, arch)
+            else:
+                self._run_step(recipe, step, arch)
+        if tasks:
+            await run_tasks (tasks)
 
 
 class UniversalFlatRecipe(BaseUniversalRecipe, UniversalFlatFilesProvider):
@@ -794,85 +870,50 @@ class UniversalFlatRecipe(BaseUniversalRecipe, UniversalFlatFilesProvider):
             return []
         return self._proxy_recipe.steps[:] + [BuildSteps.MERGE]
 
-    def merge(self):
+    async def merge(self):
         arch_inputs = {}
         for arch, recipe in self._recipes.items():
-            # change the prefix temporarly to the arch prefix where files are
-            # actually installed
-            recipe.config.prefix = os.path.join(self.config.prefix, arch)
             arch_inputs[arch] = set(recipe.files_list())
-            recipe.config.prefix = self._config.prefix
 
         # merge the common files
         inputs = reduce(lambda x, y: x & y, arch_inputs.values())
         output = self._config.prefix
         generator = OSXUniversalGenerator(output, logfile=self.logfile)
-        dirs = [os.path.join(self._config.prefix, arch) for arch in self._recipes.keys()]
-        generator.merge_files(inputs, dirs)
+        dirs = [recipe.config.prefix for arch, recipe in self._recipes.items()]
+        await generator.merge_files(inputs, dirs)
 
         # Collect files that are only in one or more archs, but not all archs
         arch_files = {}
-        for arch in self._recipes.keys():
+        for arch, recipe in self._recipes.items():
             for f in list(inputs ^ arch_inputs[arch]):
                 if f not in arch_files:
-                    arch_files[f] = {arch}
+                    arch_files[f] = {(arch, recipe)}
                 else:
-                    arch_files[f].add(arch)
+                    arch_files[f].add((arch, recipe))
         # merge the architecture specific files
         for f, archs in arch_files.items():
-            generator.merge_files([f], [os.path.join(self._config.prefix, arch) for arch in archs])
+            await generator.merge_files([f], [recipe.config.prefix for arch, recipe in archs])
 
-    def _do_step(self, step):
-        loop = asyncio.get_event_loop()
+    async def _do_step(self, step):
         if step in BuildSteps.FETCH:
             arch, recipe = list(self._recipes.items())[0]
             # No, really, let's not download a million times...
-            loop.run_until_complete(self._run_step(recipe, step, arch))
+            await self._async_run_step(recipe, step, arch)
             return
-
-        # For the universal build we need to configure both architectures with
-        # with the same final prefix, but we want to install each architecture
-        # on a different path (eg: /path/to/prefix/x86).
 
         archs_prefix = list(self._recipes.keys())
 
+        tasks = []
         for arch, recipe in self._recipes.items():
-            # Create a stamp file to list installed files based on the
-            # modification time of this file
-            if step in [BuildSteps.INSTALL[1], BuildSteps.POST_INSTALL[1]]:
-                time.sleep(2) #wait 2 seconds to make sure new files get the
-                              #proper time difference, this fixes an issue of
-                              #the next recipe to be built listing the previous
-                              #recipe files as their own
-                tmp = tempfile.NamedTemporaryFile()
-                # the modification time resolution depends on the filesystem,
-                # where FAT32 has a resolution of 2 seconds and ext4 1 second
-                t = time.time() - 2
-                os.utime(tmp.name, (t, t))
-
             # Call the step function
-            loop.run_until_complete(self._run_step(recipe, step, arch))
+            stepfunc = getattr(recipe, step)
+            if asyncio.iscoroutinefunction(stepfunc):
+                if step in (BuildSteps.EXTRACT[1], BuildSteps.CONFIGURE[1]):
+                    tasks.append(asyncio.ensure_future(self._async_run_step(recipe, step, arch)))
+                else:
+                    await self._async_run_step(recipe, step, arch)
+            else:
+                self._run_step(recipe, step, arch)
 
-            # Move installed files to the architecture prefix
-            if step in [BuildSteps.INSTALL[1], BuildSteps.POST_INSTALL[1]]:
-                installed_files = shell.find_newer_files(self._config.prefix,
-                                                         tmp.name, True)
-                tmp.close()
-                for f in installed_files:
-
-                    def not_in_prefix(src):
-                        for p in archs_prefix + ['Libraries']:
-                            if src.startswith(p):
-                                return True
-                        return False
-
-                    # skip files that are installed in the arch prefix
-                    if not_in_prefix(f):
-                        continue
-                    src = os.path.join(self._config.prefix, f)
-
-                    dest = os.path.join(self._config.prefix,
-                                        recipe.config.target_arch, f)
-                    if not os.path.exists(os.path.dirname(dest)):
-                        os.makedirs(os.path.dirname(dest))
-                    shutil.move(src, dest)
+        if tasks:
+            await run_tasks(tasks)
