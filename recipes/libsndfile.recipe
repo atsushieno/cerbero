@@ -8,7 +8,7 @@ class Recipe(recipe.Recipe):
     stype = SourceType.TARBALL
     url = 'https://github.com/erikd/libsndfile/archive/1.0.28.tar.gz'
     tarball_checksum = '89abe87316bc9afac9e5b34b137a399286cbcd6affad409b110596e3b749c897'
-    licenses = [{License.LGPLv2: ['COPYING']}]
+    licenses = [{License.LGPLv2_1Plus: ['COPYING']}]
     deps = ['libogg', 'libvorbis', 'flac']
     config_sh = 'rm ltmain.sh && sh autogen.sh'
     patches = [

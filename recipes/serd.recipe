@@ -2,13 +2,13 @@
 
 class Recipe(recipe.Recipe):
     name = 'serd'
-    version = '0.30.0'
+    version = '0.30.2'
     libNameVersioned = 'libserd-0.so'
     licenses = [{License.BSD_like: ['COPYING']}]
     btype = BuildType.CUSTOM
     stype = SourceType.GIT
     remotes = {'origin': 'https://github.com/atsushieno/serd.git'}
-    commit = '6485e1c'
+    commit = 'd393787'
 
     def configure(self):
         shell.call ('cd ' + self.build_dir + ' && LDFLAGS="$LDFLAGS -landroid -Wl,-soname,' + self.libNameVersioned + '" ./waf configure -d --no-utils --prefix=' + self.config.prefix)

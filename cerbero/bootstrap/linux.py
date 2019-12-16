@@ -71,7 +71,7 @@ class DebianBootstrapper (UnixBootstrapper):
                 'libxrender-dev', 'libgl1-mesa-dev', 'libxfixes-dev',
                 'libxdamage-dev', 'libxcomposite-dev', 'libasound2-dev',
                 'libxml-simple-perl', 'dpkg-dev', 'debhelper',
-                'build-essential', 'devscripts', 'fakeroot', 'transfig',
+                'build-essential', 'devscripts', 'fakeroot', 'fig2dev',
                 'gperf', 'libdbus-glib-1-dev', 'wget', 'glib-networking',
                 'libxtst-dev', 'libxrandr-dev', 'libglu1-mesa-dev',
                 'libegl1-mesa-dev', 'git', 'subversion', 'xutils-dev',

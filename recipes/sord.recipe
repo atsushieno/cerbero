@@ -3,12 +3,12 @@
 class Recipe(recipe.Recipe):
     name = 'sord'
     libNameVersioned = 'libsord-0.so'
-    version = '0.16.2'
+    version = '0.16.4'
     licenses = [{License.BSD_like: ['COPYING']}]
     btype = BuildType.CUSTOM
     stype = SourceType.GIT
     remotes = {'origin': 'https://github.com/atsushieno/sord.git'}
-    commit = '378076a'
+    commit = 'aa03b4f'
     deps = ['serd']
 
 
