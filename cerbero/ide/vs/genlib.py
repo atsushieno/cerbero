@@ -22,7 +22,7 @@ import shlex
 import shutil
 
 from cerbero.enums import Architecture, Platform
-from cerbero.utils import shell, to_unixpath
+from cerbero.utils import shell
 from cerbero.utils import messages as m
 from cerbero.errors import FatalError
 
@@ -39,10 +39,30 @@ class GenLib(object):
     def __init__(self, config, logfile):
         self.config = config
         self.logfile = logfile
+        self.gendef_bin = shlex.split(self.config.env['GENDEF'])
+        self.dlltool_bin = shlex.split(self.config.env['DLLTOOL'])
+
+    def _fix_broken_def_output(self, contents):
+        if self.config.target_arch != Architecture.X86:
+            return contents
+        out = ''
+        broken_entry_re = re.compile(r'([a-zA-Z_]+@[0-9]+)@[0-9]+')
+        for line in contents.split(os.linesep):
+            line = self._fix_broken_entry(line, broken_entry_re)
+            out += line + os.linesep
+        return out
+
+    def _fix_broken_entry(self, line, regex):
+        if line.startswith(';'):
+            return line
+        m = regex.match(line)
+        if not m:
+            return line
+        return m.groups()[0]
 
     def gendef(self, dllpath, outputdir, libname):
         defname = libname + '.def'
-        def_contents = shell.check_output('gendef - %s' % dllpath, outputdir,
+        def_contents = shell.check_output(self.gendef_bin + ['-', dllpath], outputdir,
                                           logfile=self.logfile, env=self.config.env)
         # If the output doesn't contain a 'LIBRARY' directive, gendef errored
         # out. However, gendef always returns 0 so we need to inspect the
@@ -50,11 +70,11 @@ class GenLib(object):
         if 'LIBRARY' not in def_contents:
             raise FatalError('gendef failed on {!r}\n{}'.format(dllpath, def_contents))
         with open(os.path.join(outputdir, defname), 'w') as f:
-            f.write(def_contents)
+            f.write(self._fix_broken_def_output(def_contents))
         return defname
 
     def dlltool(self, defname, dllname, outputdir):
-        cmd = shlex.split(self.config.env['DLLTOOL']) + ['-d', defname, '-l', self.filename, '-D', dllname]
+        cmd = self.dlltool_bin + ['-d', defname, '-l', self.filename, '-D', dllname]
         shell.new_call(cmd, outputdir, logfile=self.logfile, env=self.config.env)
 
     def create(self, libname, dllpath, platform, target_arch, outputdir):

@@ -155,7 +155,17 @@ def system_info():
 
     # Get the distro info
     if platform == Platform.LINUX:
-        d = pplatform.linux_distribution()
+        if sys.version_info >= (3, 8, 0):
+            try:
+                import distro
+            except ImportError:
+                print('''Python >= 3.8 detected and the 'distro' python package was not found.
+Please install the 'python3-distro' or 'python-distro' package from your linux package manager or from pypi using pip.
+Terminating.''', file=sys.stderr)
+                sys.exit(1)
+            d = distro.linux_distribution()
+        else:
+            d = pplatform.linux_distribution()
 
         if d[0] == '' and d[1] == '' and d[2] == '':
             if os.path.exists('/etc/arch-release'):
@@ -208,7 +218,7 @@ def system_info():
                 distro_version = DistroVersion.UBUNTU_XENIAL
             elif d[2] in ['artful']:
                 distro_version = DistroVersion.UBUNTU_ARTFUL
-            elif d[2] in ['bionic', 'tara', 'tessa', 'tina']:
+            elif d[2] in ['bionic', 'tara', 'tessa', 'tina', 'tricia']:
                 distro_version = DistroVersion.UBUNTU_BIONIC
             elif d[2] in ['cosmic']:
                 distro_version = DistroVersion.UBUNTU_COSMIC
@@ -288,7 +298,7 @@ def system_info():
         elif d[0].strip() in ['openSUSE Tumbleweed']:
             distro = Distro.SUSE
             distro_version = DistroVersion.OPENSUSE_TUMBLEWEED
-        elif d[0].strip() in ['arch']:
+        elif d[0].strip() in ['arch', 'Arch Linux']:
             distro = Distro.ARCH
             distro_version = DistroVersion.ARCH_ROLLING
         elif d[0].strip() in ['Gentoo Base System']:
