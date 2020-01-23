@@ -213,8 +213,6 @@ class Config (object):
         # Finally fill the missing gaps in the config
         self._load_last_defaults()
 
-        self._load_platform_config()
-
         # And validate properties
         self._validate_properties()
 
@@ -351,7 +349,7 @@ class Config (object):
         ld_library_path = self._join_path(
             os.path.join(self.build_tools_prefix, 'lib'), path)
         if not self.cross_compiling():
-            ld_library_path = self._join_path(ld_library_path, libdir)
+            ld_library_path = self._join_path(libdir, ld_library_path)
         if self.extra_lib_path is not None:
             ld_library_path = self._join_path(ld_library_path, self.extra_lib_path)
         if self.toolchain_prefix is not None:
