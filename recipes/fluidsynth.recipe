@@ -1,0 +1,18 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+import os
+import shutil
+
+class Recipe(recipe.Recipe):
+    """
+    Sets up build based on the fluidsynth library.
+    """
+    name = 'fluidsynth'
+    version = '2.1.0'
+    licenses = [License.LGPLv2Plus]
+    btype = BuildType.CMAKE
+    remotes = {'origin': 'https://github.com/Fluidsynth/fluidsynth'}
+    commit = 'v2.1.0'
+    configure_options = '-Denable-oss=off'
+    deps = ['libsndfile', 'glib']
+
