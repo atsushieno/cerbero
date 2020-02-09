@@ -17,6 +17,8 @@
 # Boston, MA 02111-1307, USA.
 
 
+import sys
+import argparse
 from cerbero.commands import Command, register_command
 from cerbero.utils import _, N_, ArgparseArgument, shell
 
@@ -27,17 +29,12 @@ class Run(Command):
 
     def __init__(self):
         Command.__init__(self,
-            [ArgparseArgument('cmd', nargs='+',
+            [ArgparseArgument('cmd', nargs=argparse.REMAINDER,
                              help=_('command to run')),
-             ArgparseArgument('-v', '--verbose',
-                             action='store_true',
-                             default=False,
-                             help=_('verbose mode'))
             ])
 
     def run(self, config, args):
-        command = ' '.join(args.cmd)
-        shell.call(command, '.', True, args.verbose)
+        sys.exit(shell.new_call(args.cmd, fail=False, env=config.env))
 
 
 register_command(Run)

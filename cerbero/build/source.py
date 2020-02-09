@@ -18,13 +18,14 @@
 
 import os
 import shutil
+import zipfile
 import tarfile
 import urllib.request, urllib.parse, urllib.error
 from hashlib import sha256
 
 from cerbero.config import Platform, DEFAULT_MIRRORS
 from cerbero.utils import git, svn, shell, _, run_until_complete
-from cerbero.errors import FatalError, InvalidRecipeError
+from cerbero.errors import FatalError, CommandError, InvalidRecipeError
 import cerbero.utils.messages as m
 
 URL_TEMPLATES = {
@@ -60,6 +61,10 @@ class Source (object):
     def __init__(self):
         if self.patches is None:
             self.patches = []
+
+        if not self.version:
+            raise InvalidRecipeError(
+                self, _("'version' attribute is missing in the recipe"))
 
     async def fetch(self, **kwargs):
         self.fetch_impl(**kwargs)
@@ -160,7 +165,7 @@ class BaseTarball(object):
             if not os.path.isfile(self.download_path):
                 msg = 'Offline mode: tarball {!r} not found in local sources ({})'
                 raise FatalError(msg.format(self.tarball_name, self.download_dir))
-            self.verify()
+            self.verify(self.download_path)
             m.action(_('Found %s at %s') % (self.url, self.download_path), logfile=get_logfile(self))
             return
         if not os.path.exists(self.download_dir):
@@ -171,7 +176,7 @@ class BaseTarball(object):
         await shell.download(self.url, self.download_path, check_cert=cc,
             overwrite=redownload, logfile=get_logfile(self),
             mirrors= self.config.extra_mirrors + DEFAULT_MIRRORS)
-        self.verify()
+        self.verify(self.download_path)
 
     @staticmethod
     def _checksum(fname):
@@ -183,9 +188,7 @@ class BaseTarball(object):
                 h.update(block)
         return h.hexdigest()
 
-    def verify(self, fname=None, fatal=True):
-        if fname is None:
-            fname = self.download_path
+    def verify(self, fname, fatal=True):
         checksum = self._checksum(fname)
         if self.tarball_checksum is None:
             raise FatalError('tarball_checksum is missing in {}.recipe for tarball {}\n'
@@ -202,12 +205,20 @@ class BaseTarball(object):
         return True
 
     async def extract_tarball(self, unpack_dir):
+        fname = self.download_path
+        logfile = get_logfile(self)
         try:
-            await shell.unpack(self.download_path, unpack_dir, logfile=get_logfile(self))
-        except (IOError, EOFError, tarfile.ReadError):
-            m.action(_('Corrupted or partial tarball, redownloading...'), logfile=get_logfile(self))
+            await shell.unpack(fname, unpack_dir, logfile=logfile)
+        except (CommandError, tarfile.ReadError, zipfile.BadZipFile):
+            movedto = fname + '.failed-extract'
+            os.replace(fname, movedto)
+            m.action('Corrupted or partial tarball {} moved to {}, redownloading...'.format(fname, movedto),
+                     logfile=logfile)
+            if self.offline:
+                # Can't fetch in offline mode
+                raise
             await self.fetch(redownload=True)
-            await shell.unpack(self.download_path, unpack_dir, logfile=get_logfile(self))
+            await shell.unpack(fname, unpack_dir, logfile=logfile)
 
 
 class Tarball(BaseTarball, Source):
@@ -216,7 +227,7 @@ class Tarball(BaseTarball, Source):
         Source.__init__(self)
         if not self.url:
             raise InvalidRecipeError(
-                _("'url' attribute is missing in the recipe"))
+                self, _("'url' attribute is missing in the recipe"))
         self.url = self.expand_url_template(self.url)
         self.url = self.replace_name_and_version(self.url)
         if self.tarball_name is not None:
@@ -294,7 +305,7 @@ class GitCache (Source):
         cached_dir = os.path.join(self.config.cached_sources,  self.name)
 
         if not os.path.exists(self.repo_dir):
-            if not cached_dir and offline:
+            if not cached_dir and self.offline:
                 msg = 'Offline mode: git repo for {!r} not found in cached sources ({}) or local sources ({})'
                 raise FatalError(msg.format(self.name, self.config.cached_sources, self.repo_dir))
             git.init(self.repo_dir, logfile=get_logfile(self))
