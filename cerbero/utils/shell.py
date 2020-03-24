@@ -158,10 +158,14 @@ def call(cmd, cmd_dir='.', fail=True, verbose=False, logfile=None, env=None):
     return ret
 
 
-def check_output(cmd, cmd_dir=None, fail=True, logfile=None, env=None):
+def check_output(cmd, cmd_dir=None, fail=True, logfile=None, env=None, quiet=False):
     cmd = _cmd_string_to_array(cmd, env)
+    stderr = logfile
+    if quiet and not logfile:
+        stderr = subprocess.DEVNULL
+
     try:
-        o = subprocess.check_output(cmd, cwd=cmd_dir, env=env, stderr=logfile)
+        o = subprocess.check_output(cmd, cwd=cmd_dir, env=env, stderr=stderr)
     except SUBPROCESS_EXCEPTIONS as e:
         msg = getattr(e, 'output', '')
         if not fail:
@@ -193,7 +197,7 @@ def new_call(cmd, cmd_dir=None, fail=True, logfile=None, env=None):
                 stream.write('{!r}: permission error\n'.format(cmd))
             return returncode
         msg = ''
-        if stream:
+        if logfile:
             msg = 'Output in logfile {}'.format(logfile.name)
         raise CommandError(msg, cmd, returncode)
     return 0
@@ -330,7 +334,7 @@ async def unpack(filepath, output_dir, logfile=None):
     else:
         raise FatalError("Unknown tarball format %s" % filepath)
 
-async def download_wget(url, destination=None, check_cert=True, overwrite=False):
+async def download_wget(url, destination=None, check_cert=True, overwrite=False, logfile=None):
     '''
     Downloads a file with wget
 
@@ -339,26 +343,24 @@ async def download_wget(url, destination=None, check_cert=True, overwrite=False)
     @param destination: destination where the file will be saved
     @type destination: str
     '''
-    cmd = "wget %s " % url
+    cmd = ['wget', url]
     path = None
     if destination is not None:
-        cmd += "-O %s " % destination
+        cmd += ['-O', destination]
 
     if not check_cert:
-        cmd += " --no-check-certificate"
+        cmd += ['--no-check-certificate']
 
-    cmd += " --tries=2"
-    cmd += " --timeout=20.0"
-    cmd += " --progress=dot:giga"
+    cmd += ['--tries=2', '--timeout=20.0', '--progress=dot:giga']
 
     try:
-        await async_call(cmd, path, cpu_bound=False)
+        await async_call(cmd, path, cpu_bound=False, logfile=logfile)
     except FatalError as e:
         if os.path.exists(destination):
             os.remove(destination)
         raise e
 
-async def download_urllib2(url, destination=None, check_cert=True, overwrite=False):
+async def download_urllib2(url, destination=None, check_cert=True, overwrite=False, logfile=None):
     '''
     Download a file with urllib2, which does not rely on external programs
 
@@ -386,7 +388,7 @@ async def download_urllib2(url, destination=None, check_cert=True, overwrite=Fal
             os.remove(destination)
         raise e
 
-async def download_curl(url, destination=None, check_cert=True, overwrite=False):
+async def download_curl(url, destination=None, check_cert=True, overwrite=False, logfile=None):
     '''
     Downloads a file with cURL
 
@@ -396,15 +398,15 @@ async def download_curl(url, destination=None, check_cert=True, overwrite=False)
     @type destination: str
     '''
     path = None
-    cmd = "curl -L --fail --retry 2 "
+    cmd = ['curl', '-L', '--fail', '--retry', '2']
     if not check_cert:
-        cmd += " -k "
+        cmd += ['-k']
     if destination is not None:
-        cmd += "%s -o %s " % (url, destination)
+        cmd += [url, '-o', destination]
     else:
-        cmd += "-O %s " % url
+        cmd += ['-O', url]
     try:
-        await async_call(cmd, path, cpu_bound=False)
+        await async_call(cmd, path, cpu_bound=False, logfile=logfile)
     except FatalError as e:
         if os.path.exists(destination):
             os.remove(destination)
@@ -460,12 +462,12 @@ async def download(url, destination=None, check_cert=True, overwrite=False, logf
     errors = []
     for murl in urls:
         try:
-            return await download_func(murl, destination, check_cert, overwrite)
+            return await download_func(murl, destination, check_cert, overwrite, logfile)
         except Exception as ex:
-            errors.append(ex)
+            errors.append((murl, ex))
     if len(errors) == 1:
-        raise errors[0]
-    raise Exception (errors)
+        errors = errors[0]
+    raise FatalError('Failed to download {!r}: {!r}'.format(url, errors))
 
 
 def _splitter(string, base_url):

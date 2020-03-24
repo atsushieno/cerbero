@@ -29,7 +29,7 @@ from cerbero.errors import FatalError, ConfigurationError
 from cerbero.utils import _, system_info, validate_packager, shell
 from cerbero.utils import to_unixpath, to_winepath, parse_file, detect_qt5
 from cerbero.utils import messages as m
-from cerbero.ide.vs.env import get_vs_version
+from cerbero.ide.vs.env import get_vs_year_version
 
 
 CONFIG_EXT = 'cbc'
@@ -132,7 +132,8 @@ class Config (object):
                    'meson_cross_properties', 'manifest', 'extra_properties',
                    'qt5_qmake_path', 'qt5_pkgconfigdir', 'for_shell',
                    'package_tarball_compression', 'extra_mirrors',
-                   'extra_bootstrap_packages', 'moltenvk_prefix']
+                   'extra_bootstrap_packages', 'moltenvk_prefix',
+                   'vs_install_path', 'vs_install_version']
 
     cookbook = None
 
@@ -158,6 +159,14 @@ class Config (object):
             'PKG_CONFIG_PATH', 'PKG_CONFIG_LIBDIR', 'GI_TYPELIB_PATH',
              'XDG_DATA_DIRS', 'XDG_CONFIG_DIRS', 'GST_PLUGIN_PATH',
              'GST_PLUGIN_PATH_1_0', 'PYTHONPATH', 'MONO_PATH')
+
+    def _is_env_multivalue_key(self, key):
+        return key in ('CFLAGS', 'CXXFLAGS', 'LDFLAGS', 'OBJCFLAGS', 'OBJCXXFLAGS')
+
+    def can_use_msvc(self):
+        if self.variants.visualstudio and self.msvc_version is not None:
+            return True
+        return False
 
     def load(self, filename=None, variants_override=None):
         if variants_override is None:
@@ -249,21 +258,26 @@ class Config (object):
 
         self.do_setup_env()
 
-        if self.variants.visualstudio and self.msvc_version is not None:
+        if self.can_use_msvc():
             m.message('Building recipes with Visual Studio {} whenever possible'
-                      .format(get_vs_version(self.msvc_version)))
+                      .format(get_vs_year_version(self.msvc_version)))
+            if self.vs_install_path:
+                m.message('Using Visual Studio installed at {!r}'.format(self.vs_install_path))
 
         # Store current os.environ data
         for c in list(self.arch_config.values()):
             self._create_path(c.local_sources)
             self._create_path(c.sources)
             self._create_path(c.logs)
+        m.message('Install prefix will be {}'.format(self.prefix))
 
     def do_setup_env(self):
         self._create_path(self.prefix)
         self._create_path(os.path.join(self.prefix, 'share', 'aclocal'))
         self._create_path(os.path.join(
             self.build_tools_prefix, 'share', 'aclocal'))
+        self._create_path(os.path.join(
+            self.build_tools_prefix, 'var', 'tmp'))
 
         libdir = os.path.join(self.prefix, 'lib%s' % self.lib_suffix)
         self.libdir = libdir
@@ -290,6 +304,31 @@ class Config (object):
             env[each] = to_winepath(env[each])
         env['WINEPATH'] = to_winepath(os.path.join(prefix, 'bin'))
         return env
+
+    def _merge_env(self, old_env, new_env, override_env=()):
+        ret_env = {}
+        for k in new_env.keys():
+            new_v = new_env[k]
+            if isinstance(new_v, list):
+                # Toolchain env is in a different format
+                new_v = new_v[0]
+            if k not in old_env or k in override_env:
+                ret_env[k] = new_v
+                continue
+            old_v = old_env[k]
+            if new_v == old_v:
+                ret_env[k] = new_v
+            elif self._is_env_multipath_key(k):
+                ret_env[k] = self._join_path(new_v, old_v)
+            elif self._is_env_multivalue_key(k):
+                ret_env[k] = self._join_values(new_v, old_v)
+            else:
+                raise FatalError("Don't know how to combine the environment "
+                    "variable '%s' with values '%s' and '%s'" % (k, new_v, old_v))
+        for k in old_env.keys():
+            if k not in new_env:
+                ret_env[k] = old_env[k]
+        return ret_env
 
     @lru_cache(maxsize=None)
     def get_env(self, prefix, libdir, py_prefix):
@@ -358,11 +397,7 @@ class Config (object):
         ldflags = self.config_env.get('LDFLAGS', '')
         ldflags_libdir = '-L%s ' % libdir
         if ldflags_libdir not in ldflags:
-            # Ensure there's no leading whitespace in LDFLAGS
-            if ldflags:
-                ldflags += ' ' + ldflags_libdir
-            else:
-                ldflags = ldflags_libdir
+            ldflags = self._join_values(ldflags, ldflags_libdir)
 
         path = self.config_env.get('PATH', None)
         path = self._join_path(
@@ -372,8 +407,7 @@ class Config (object):
         if bindir not in path and self.prefix_is_executable():
             path = self._join_path(bindir, path)
 
-        ld_library_path = self._join_path(
-            os.path.join(self.build_tools_prefix, 'lib'), path)
+        ld_library_path = os.path.join(self.build_tools_prefix, 'lib')
         if not self.cross_compiling():
             ld_library_path = self._join_path(libdir, ld_library_path)
         if self.extra_lib_path is not None:
@@ -388,8 +422,6 @@ class Config (object):
         # Most of these variables are extracted from jhbuild
         env = {'LD_LIBRARY_PATH': ld_library_path,
                'LDFLAGS': ldflags,
-               'C_INCLUDE_PATH': includedir,
-               'CPLUS_INCLUDE_PATH': includedir,
                'PATH': path,
                'MANPATH': manpathdir,
                'INFOPATH': infopathdir,
@@ -415,28 +447,25 @@ class Config (object):
                'CERBERO_HOST_SOURCES': self.sources
                }
 
-        # merge the config env with this new env
-        new_env = {}
-        for k in env.keys():
-            if k not in self.config_env:
-                new_env[k] = env[k]
-            else:
-                env_v = env[k]
-                config_v = self.config_env[k]
-                if env_v == config_v:
-                    new_env[k] = env_v
-                elif k in ('LDFLAGS', 'PATH'):
-                    # handled above
-                    new_env[k] = env_v
-                elif self._is_env_multipath_key(k):
-                    new_env[k] = self._join_path(env_v, config_v)
-                else:
-                    raise FatalError("Don't know how to combine the environment "
-                        "variable '%s' with values '%s' and '%s'" % (k, env_v, config_v))
+        # Some autotools recipes will call the native (non-cross) compiler to
+        # build generators, and we don't want it to use these. We will set the
+        # include paths using CFLAGS, etc, when cross-compiling.
+        if not self.cross_compiling():
+            env['C_INCLUDE_PATH'] = includedir
+            env['CPLUS_INCLUDE_PATH'] = includedir
 
-        for k in self.config_env.keys():
-            if k not in env:
-                new_env[k] = self.config_env[k]
+        # On Windows, we have a toolchain env that we need to set, but only
+        # when running as a shell
+        if self.platform == Platform.WINDOWS and self.for_shell:
+            if self.can_use_msvc():
+                toolchain_env = self.msvc_toolchain_env
+            else:
+                toolchain_env = self.mingw_toolchain_env
+            env = self._merge_env(env, toolchain_env)
+
+        # merge the config env with this new env
+        # LDFLAGS and PATH were already merged above
+        new_env = self._merge_env(self.config_env, env, override_env=('LDFLAGS', 'PATH'))
 
         if self.target_platform == Platform.WINDOWS and self.platform != Platform.WINDOWS:
             new_env = self.get_wine_runtime_env(prefix, new_env)
@@ -569,7 +598,8 @@ class Config (object):
         return self.target_distro_version >= distro_version
 
     def _parse(self, filename, reset=True):
-        config = {'os': os, '__file__': filename, 'env' : self.config_env}
+        config = {'os': os, '__file__': filename, 'env' : self.config_env,
+                  'cross': self.cross_compiling()}
         if not reset:
             for prop in self._properties:
                 if hasattr(self, prop):
@@ -599,16 +629,16 @@ class Config (object):
             except:
                 raise FatalError(_('directory (%s) can not be created') % path)
 
+    def _join_values(self, value1, value2, sep=' '):
+        # Ensure there's no leading or trailing whitespace
+        if len(value1) == 0:
+            return value2
+        if len(value2) == 0:
+            return value1
+        return '{}{}{}'.format(value1, sep, value2)
+
     def _join_path(self, path1, path2):
-        if len(path1) == 0:
-            return path2
-        if len(path2) == 0:
-            return path1
-        if self.platform == Platform.WINDOWS:
-            separator = ';'
-        else:
-            separator = ':'
-        return "%s%s%s" % (path1, separator, path2)
+        return self._join_values(path1, path2, os.pathsep)
 
     def _load_user_config(self):
         if os.path.exists(USER_CONFIG_FILE):
@@ -641,8 +671,18 @@ class Config (object):
 
     def _load_last_defaults(self):
         target_platform = self.target_platform
-        if target_platform == Platform.WINDOWS and 'visualstudio' in self.variants:
-            target_platform = 'msvc'
+        if target_platform == Platform.WINDOWS:
+            if 'visualstudio' in self.variants:
+                target_platform = 'msvc'
+                # Check for invalid configuration of a custom Visual Studio path
+                if self.vs_install_path and not self.vs_install_version:
+                    raise ConfigurationError('vs_install_path was set, but vs_install_version was not')
+            else:
+                target_platform = 'mingw'
+            # If the cmd config set the prefix, append the variant modifier to
+            # it so that we don't clobber different toolchain builds
+            if self.prefix is not None:
+                self.prefix += '.' + target_platform
         self.set_property('prefix', os.path.join(self.home_dir, "dist",
             "%s_%s" % (target_platform, self.target_arch)))
         self.set_property('sources', os.path.join(self.home_dir, "sources",

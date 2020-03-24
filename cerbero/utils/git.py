@@ -124,7 +124,15 @@ async def fetch(git_dir, fail=True, logfile=None):
     @param fail: raise an error if the command failed
     @type fail: false
     '''
+    # git 1.9 introduced the possibility to fetch both branches and tags at the
+    # same time when using --tags: https://stackoverflow.com/a/20608181.
+    # centOS 7 ships with git 1.8.3.1, hence for old git versions, we need to
+    # run two separate commands.
     cmd = [GIT, 'fetch', '--all']
+    ret = await shell.async_call(cmd, cmd_dir=git_dir, fail=fail, logfile=logfile, cpu_bound=False)
+    if ret != 0:
+        return ret
+    cmd.append('--tags')
     return await shell.async_call(cmd, cmd_dir=git_dir, fail=fail, logfile=logfile, cpu_bound=False)
 
 async def submodules_update(git_dir, src_dir=None, fail=True, offline=False, logfile=None):
@@ -179,7 +187,7 @@ async def checkout(git_dir, commit, logfile=None):
     return await shell.async_call(cmd, git_dir, logfile=logfile, cpu_bound=False)
 
 
-def get_hash(git_dir, commit):
+def get_hash(git_dir, commit, logfile=None):
     '''
     Get a commit hash from a valid commit.
     Can be used to check if a commit exists
@@ -194,7 +202,8 @@ def get_hash(git_dir, commit):
         # can get called from built_version() when the directory isn't git.
         # Return a fixed string + unix time to trigger a full fetch.
         return 'not-git-' + str(time.time())
-    return shell.check_output([GIT, 'rev-parse', commit], cmd_dir=git_dir).rstrip()
+    return shell.check_output([GIT, 'rev-parse', commit], cmd_dir=git_dir,
+                              fail=False, quiet=True, logfile=logfile).rstrip()
 
 
 async def local_checkout(git_dir, local_git_dir, commit, logfile=None):

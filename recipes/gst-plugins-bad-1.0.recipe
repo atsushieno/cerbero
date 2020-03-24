@@ -15,6 +15,7 @@ class Recipe(custom.GStreamer):
                      'dtls': 'enabled',
                      'dts': 'enabled',
                      'hls': 'enabled',
+                     'hls-crypto': 'openssl',
                      'kate': 'enabled',
                      'libmms': 'enabled',
                      'openh264': 'enabled',
@@ -62,7 +63,7 @@ class Recipe(custom.GStreamer):
                      'wildmidi': 'disabled',
                     }
     deps = ['gstreamer-1.0', 'gst-plugins-base-1.0', 'bzip2', 'libass',
-            'libkate', 'zlib', 'openh264', 'opus', 'nettle', 'librtmp',
+            'libkate', 'zlib', 'openh264', 'opus', 'librtmp',
             'libsrtp', 'libdca', 'libmms', 'libdvdnav', 'libnice',
             'soundtouch', 'vo-aacenc', 'librsvg', 'openjpeg',
             'pango', 'spandsp', 'webrtc-audio-processing', 'sbc', 'ladspa',
@@ -71,11 +72,20 @@ class Recipe(custom.GStreamer):
 
     files_lang = ['gst-plugins-bad-1.0']
 
-    files_libs = ['libgstcodecparsers-1.0', 'libgstmpegts-1.0', 'libgsturidownloader-1.0',
-                  'libgstbasecamerabinsrc-1.0', 'libgstphotography-1.0',
-                  'libgstinsertbin-1.0', 'libgstadaptivedemux-1.0',
-                  'libgstplayer-1.0', 'libgstbadaudio-1.0',
-                  'libgstisoff-1.0', 'libgstsctp-1.0', 'libgstwebrtc-1.0', 'libgstvulkan-1.0']
+    files_libs = ['libgstcodecparsers-1.0',
+                  'libgstcodecs-1.0',
+                  'libgstmpegts-1.0',
+                  'libgsturidownloader-1.0',
+                  'libgstbasecamerabinsrc-1.0',
+                  'libgstphotography-1.0',
+                  'libgstinsertbin-1.0',
+                  'libgstadaptivedemux-1.0',
+                  'libgstplayer-1.0',
+                  'libgstbadaudio-1.0',
+                  'libgstisoff-1.0',
+                  'libgstsctp-1.0',
+                  'libgstwebrtc-1.0',
+                  'libgstvulkan-1.0']
 
     files_plugins_devel = [
         'include/gstreamer-1.0/gst/mpegts',
@@ -453,9 +463,6 @@ class Recipe(custom.GStreamer):
             self.meson_options['directsound'] = 'enabled'
             self.meson_options['winks'] = 'enabled'
             self.meson_options['winscreencap'] = 'enabled'
-            if not self.using_msvc():
-                # FIXME: Temporal fix to pass the CI's with the new toolchain
-                self.append_env('CFLAGS', '-Wno-error=switch')
 
         if self.config.target_platform in (Platform.LINUX, Platform.DARWIN, Platform.IOS):
             self.meson_options['shm'] = 'enabled'
@@ -473,6 +480,8 @@ class Recipe(custom.GStreamer):
         if self.config.target_platform in (Platform.ANDROID, Platform.IOS):
             self.disable_plugin('resindvd', 'dvd', dep='libdvdnav')
 
+        # dtls plugin needs openssl, and we pick up the system openssl if on
+        # Linux and not cross-compiling.
         if self.config.target_platform != Platform.LINUX or self.config.cross_compiling():
             self.deps.append('openssl')
 

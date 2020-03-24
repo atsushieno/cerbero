@@ -417,6 +417,15 @@ def add_system_libs(config, new_env, old_env=None):
     arch = config.target_arch
     libdir = 'lib'
 
+    # Only use this when compiling on Linux for Linux and not cross-compiling
+    # to some other Linux
+    if config.platform != Platform.LINUX:
+        return
+    if config.target_platform != Platform.LINUX:
+        return
+    if config.cross_compiling():
+        return
+
     if arch == Architecture.X86_64:
         if config.distro == Distro.REDHAT or config.distro == Distro.SUSE:
             libdir = 'lib64'
@@ -559,15 +568,34 @@ def get_event_loop():
         loop = asyncio.ProactorEventLoop()
         asyncio.set_event_loop(loop)
 
+    # Avoid spammy BlockingIOError warnings with older python versions
+    if sys.platform != 'win32' and \
+       sys.version_info < (3, 8, 0):
+        asyncio.set_child_watcher(asyncio.FastChildWatcher())
+        asyncio.get_child_watcher().attach_loop(loop)
+
     return loop
 
 def run_until_complete(tasks):
+    '''
+    Runs one or many tasks, blocking until all of them have finished.
+    @param tasks: A single Future or a list of Futures to run
+    @type tasks: Future or list of Futures
+    @return: the result of the asynchronous task execution (if only
+             one task) or a list of all results in case of multiple
+             tasks. Result is None if operation is cancelled.
+    @rtype: any type or list of any types in case of multiple tasks
+    '''
     loop = get_event_loop()
 
-    if isinstance(tasks, Iterable):
-        loop.run_until_complete(asyncio.gather(*tasks))
-    else:
-        loop.run_until_complete(tasks)
+    try:
+        if isinstance(tasks, Iterable):
+            result = loop.run_until_complete(asyncio.gather(*tasks))
+        else:
+            result = loop.run_until_complete(tasks)
+        return result
+    except asyncio.CancelledError:
+        return None
 
 async def run_tasks(tasks, done_async=None):
     """
@@ -586,23 +614,31 @@ async def run_tasks(tasks, done_async=None):
         task = asyncio.ensure_future (queue_done())
         tasks.append(task)
 
-    async def shutdown():
-        [task.cancel() for task in tasks]
-        ret = await asyncio.gather(*tasks, return_exceptions=True)
+    async def shutdown(abnormal=True):
+        tasks_minus_current = [t for t in tasks]
+        [task.cancel() for task in tasks_minus_current]
+        ret = await asyncio.gather(*tasks_minus_current, return_exceptions=True)
         # we want to find any actual exception rather than one
         # that may be returned from task.cancel()
+        cancelled = None
         for e in ret:
+            if isinstance(e, asyncio.CancelledError):
+                cancelled = e
             if isinstance(e, Exception) \
                and not isinstance(e, asyncio.CancelledError) \
                and not isinstance(e, QueueDone):
                 raise e
+        if abnormal and cancelled:
+            # use cancelled as a last resort we would prefer to throw any
+            # other exception but only if something abnormal happened
+            raise cancelled
 
     try:
         await asyncio.gather(*tasks, return_exceptions=False)
     except asyncio.CancelledError:
-        pass
+        raise
     except QueueDone:
-        await shutdown()
+        await shutdown(abnormal=False)
     except Exception:
         await shutdown()
         raise

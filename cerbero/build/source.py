@@ -30,7 +30,7 @@ import cerbero.utils.messages as m
 
 URL_TEMPLATES = {
     'gnome': ('https://download.gnome.org/sources/', '%(name)s/%(maj_ver)s/%(name)s-%(version)s', '.tar.xz'),
-    'gnu': ('https://ftpmirror.gnu.org/', '%(name)s/%(name)s-%(version)s', '.tar.xz'),
+    'gnu': ('https://ftp.gnu.org/gnu/', '%(name)s/%(name)s-%(version)s', '.tar.xz'),
     'savannah': ('https://download.savannah.gnu.org/releases/', '%(name)s/%(name)s-%(version)s', '.tar.xz'),
     'sf': ('https://download.sourceforge.net/', '%(name)s/%(name)s-%(version)s', '.tar.xz'),
     'xiph': ('https://downloads.xiph.org/releases/', '%(name)s/%(name)s-%(version)s', '.tar.xz'),
@@ -330,7 +330,7 @@ class GitCache (Source):
 
 
     def built_version(self):
-        return '%s+git~%s' % (self.version, git.get_hash(self.repo_dir, self.commit))
+        return '%s+git~%s' % (self.version, git.get_hash(self.repo_dir, self.commit, logfile=get_logfile(self)))
 
 
 class LocalTarball (GitCache):
@@ -397,8 +397,8 @@ class Git (GitCache):
     async def extract(self):
         if os.path.exists(self.build_dir):
             try:
-                commit_hash = git.get_hash(self.repo_dir, self.commit)
-                checkout_hash = git.get_hash(self.build_dir, 'HEAD')
+                commit_hash = git.get_hash(self.repo_dir, self.commit, logfile=get_logfile(self))
+                checkout_hash = git.get_hash(self.build_dir, 'HEAD', logfile=get_logfile(self))
                 if commit_hash == checkout_hash and not self.patches:
                     return False
             except Exception:
