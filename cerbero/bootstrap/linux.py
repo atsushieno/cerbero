@@ -21,17 +21,18 @@ from cerbero.bootstrap.bootstrapper import register_bootstrapper
 from cerbero.enums import Platform, Architecture, Distro, DistroVersion
 from cerbero.errors import ConfigurationError
 from cerbero.utils import shell
+from cerbero.utils import messages as m
 
+import shlex
 import subprocess
 
 class UnixBootstrapper (BootstrapperBase):
 
-    tool = ''
-    command = ''
-    yes_arg = ''
+    tool = []
+    command = []
+    yes_arg = []
     checks = []
     packages = []
-    distro_packages = {}
 
     def __init__(self, config, offline, assume_yes):
         BootstrapperBase.__init__(self, config, offline)
@@ -42,9 +43,6 @@ class UnixBootstrapper (BootstrapperBase):
             c()
 
         if self.config.distro_packages_install:
-            packages = self.packages
-            if self.config.distro_version in self.distro_packages:
-                packages += self.distro_packages[self.config.distro_version]
             extra_packages = self.config.extra_bootstrap_packages.get(
                 self.config.platform, None)
             if extra_packages:
@@ -52,19 +50,22 @@ class UnixBootstrapper (BootstrapperBase):
                 self.packages += extra_packages.get(self.config.distro_version, [])
             tool = self.tool
             if self.assume_yes:
-              tool += ' ' + self.yes_arg;
-            tool += ' ' + self.command;
-            shell.call(tool % ' '.join(self.packages))
+                tool += self.yes_arg;
+            tool += self.command;
+            cmd = tool + self.packages
+            m.message("Running command '%s'" % ' '.join(cmd))
+            shell.new_call(cmd)
 
 
 class DebianBootstrapper (UnixBootstrapper):
 
-    tool = 'sudo apt-get'
-    command = 'install %s'
-    yes_arg = '-y'
+    tool = ['sudo', 'apt-get']
+    command = ['install']
+    yes_arg = ['-y']
     packages = ['autotools-dev', 'automake', 'autoconf', 'libtool', 'g++',
                 'autopoint', 'make', 'cmake', 'bison', 'flex', 'nasm',
-                'pkg-config', 'gtk-doc-tools', 'libxv-dev', 'libx11-dev',
+                'pkg-config', 'gtk-doc-tools', 'libxv-dev',
+                'libx11-dev', 'libx11-xcb-dev',
                 'libpulse-dev', 'python3-dev', 'texinfo', 'gettext',
                 'build-essential', 'pkg-config', 'doxygen', 'curl',
                 'libxext-dev', 'libxi-dev', 'x11proto-record-dev',
@@ -106,9 +107,9 @@ class DebianBootstrapper (UnixBootstrapper):
 
 class RedHatBootstrapper (UnixBootstrapper):
 
-    tool = 'dnf'
-    command = 'install %s'
-    yes_arg = '-y'
+    tool = ['dnf']
+    command = ['install']
+    yes_arg = ['-y']
     packages = ['gcc', 'gcc-c++', 'automake', 'autoconf', 'libtool',
                 'gettext-devel', 'make', 'cmake', 'bison', 'flex', 'nasm',
                 'pkgconfig', 'gtk-doc', 'curl', 'doxygen', 'texinfo',
@@ -127,11 +128,11 @@ class RedHatBootstrapper (UnixBootstrapper):
         UnixBootstrapper.__init__(self, config, offline, assume_yes)
 
         if self.config.distro_version < DistroVersion.FEDORA_23:
-            self.tool = 'yum'
+            self.tool = ['yum']
         elif self.config.distro_version in [DistroVersion.REDHAT_6, DistroVersion.REDHAT_7]:
-            self.tool = 'yum'
+            self.tool = ['yum']
         elif self.config.distro_version == DistroVersion.REDHAT_8:
-            self.tool = 'yum --enablerepo=PowerTools'
+            self.tool = ['yum', '--enablerepo=PowerTools']
             # See https://bugzilla.redhat.com/show_bug.cgi?id=1757002
             self.packages.remove('docbook-utils-pdf')
 
@@ -145,15 +146,15 @@ class RedHatBootstrapper (UnixBootstrapper):
             self.packages.append('fuse-devel')
         # Use sudo to gain root access on everything except RHEL
         if self.config.distro_version == DistroVersion.REDHAT_6:
-            self.tool = 'su -c "' + self.tool + '"'
+            self.tool = ['su', '-c', shlex.join(self.tool)]
         else:
-            self.tool = 'sudo ' + self.tool
+            self.tool = ['sudo'] + self.tool
 
 class OpenSuseBootstrapper (UnixBootstrapper):
 
-    tool = 'sudo zypper'
-    command = 'install %s'
-    yes_arg = '-y'
+    tool = ['sudo', 'zypper']
+    command = ['install']
+    yes_arg = ['-y']
     packages = ['gcc', 'automake', 'autoconf', 'gcc-c++', 'libtool',
             'gettext-tools', 'make', 'cmake', 'bison', 'flex', 'nasm',
             'gtk-doc', 'curl', 'doxygen', 'texinfo',
@@ -169,9 +170,9 @@ class OpenSuseBootstrapper (UnixBootstrapper):
 
 class ArchBootstrapper (UnixBootstrapper):
 
-    tool = 'sudo pacman'
-    command = ' -S %s --needed'
-    yes_arg = ' --noconfirm'
+    tool = ['sudo', 'pacman']
+    command = ['-S', '--needed']
+    yes_arg = ['--noconfirm']
     packages = ['intltool', 'cmake', 'doxygen', 'gtk-doc',
             'libtool', 'bison', 'flex', 'automake', 'autoconf', 'make',
             'curl', 'gettext', 'alsa-lib', 'nasm', 'gperf',
@@ -184,8 +185,8 @@ class ArchBootstrapper (UnixBootstrapper):
 
         has_multilib = True
         try:
-          subprocess.check_output(["pacman", "-Sp", "gcc-multilib"])
-        except subprocess.CalledProcessError:
+          shell.check_output (["pacman", "-Sp", "gcc-multilib"])
+        except CommandError:
           has_multilib = False
 
         if self.config.arch == Architecture.X86_64 and has_multilib:
@@ -195,9 +196,9 @@ class ArchBootstrapper (UnixBootstrapper):
 
 class GentooBootstrapper (UnixBootstrapper):
 
-    tool = 'sudo emerge'
-    command = '-u %s'
-    yes_arg = '' # Does not seem interactive
+    tool = ['sudo', 'emerge']
+    command = ['-u']
+    yes_arg = [] # Does not seem interactive
     packages = ['dev-util/intltool', 'sys-fs/fuse', 'dev-util/cmake',
             'app-doc/doxygen', 'dev-util/gtk-doc', 'sys-devel/libtool',
             'sys-devel/bison', 'sys-devel/flex', 'sys-devel/automake',

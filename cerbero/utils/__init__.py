@@ -17,8 +17,9 @@
 # Boston, MA 02111-1307, USA.
 
 import os
-import shutil
 import sys
+import shlex
+import shutil
 try:
     import sysconfig
 except:
@@ -36,7 +37,7 @@ from pathlib import Path, PureWindowsPath, PurePath
 from collections.abc import Iterable
 
 from cerbero.enums import Platform, Architecture, Distro, DistroVersion
-from cerbero.errors import FatalError
+from cerbero.errors import FatalError, CommandError
 from cerbero.utils import messages as m
 
 _ = gettext.gettext
@@ -186,44 +187,50 @@ Terminating.''', file=sys.stderr)
                                     version = v.strip('"')
                         d = (name, version, '');
 
-        if d[0] in ['Ubuntu', 'debian', 'LinuxMint']:
+        if d[0] in ['Ubuntu', 'debian', 'Debian GNU/Linux', 'LinuxMint']:
             distro = Distro.DEBIAN
-            if d[2] in ['maverick', 'isadora']:
+            distro_version = d[2].lower()
+            split_str = d[2].split()
+            if split_str:
+                distro_version = split_str[0].lower()
+            if distro_version in ['maverick', 'isadora']:
                 distro_version = DistroVersion.UBUNTU_MAVERICK
-            elif d[2] in ['lucid', 'julia']:
+            elif distro_version in ['lucid', 'julia']:
                 distro_version = DistroVersion.UBUNTU_LUCID
-            elif d[2] in ['natty', 'katya']:
+            elif distro_version in ['natty', 'katya']:
                 distro_version = DistroVersion.UBUNTU_NATTY
-            elif d[2] in ['oneiric', 'lisa']:
+            elif distro_version in ['oneiric', 'lisa']:
                 distro_version = DistroVersion.UBUNTU_ONEIRIC
-            elif d[2] in ['precise', 'maya']:
+            elif distro_version in ['precise', 'maya']:
                 distro_version = DistroVersion.UBUNTU_PRECISE
-            elif d[2] in ['quantal', 'nadia']:
+            elif distro_version in ['quantal', 'nadia']:
                 distro_version = DistroVersion.UBUNTU_QUANTAL
-            elif d[2] in ['raring', 'olivia']:
+            elif distro_version in ['raring', 'olivia']:
                 distro_version = DistroVersion.UBUNTU_RARING
-            elif d[2] in ['saucy', 'petra']:
+            elif distro_version in ['saucy', 'petra']:
                 distro_version = DistroVersion.UBUNTU_SAUCY
-            elif d[2] in ['trusty', 'qiana', 'rebecca']:
+            elif distro_version in ['trusty', 'qiana', 'rebecca']:
                 distro_version = DistroVersion.UBUNTU_TRUSTY
-            elif d[2] in ['utopic']:
+            elif distro_version in ['utopic']:
                 distro_version = DistroVersion.UBUNTU_UTOPIC
-            elif d[2] in ['vivid']:
+            elif distro_version in ['vivid']:
                 distro_version = DistroVersion.UBUNTU_VIVID
-            elif d[2] in ['wily']:
+            elif distro_version in ['wily']:
                 distro_version = DistroVersion.UBUNTU_WILY
-            elif d[2] in ['xenial', 'sarah', 'serena', 'sonya', 'sylvia']:
+            elif distro_version in ['xenial', 'sarah', 'serena', 'sonya', 'sylvia']:
                 distro_version = DistroVersion.UBUNTU_XENIAL
-            elif d[2] in ['artful']:
+            elif distro_version in ['artful']:
                 distro_version = DistroVersion.UBUNTU_ARTFUL
-            elif d[2] in ['bionic', 'tara', 'tessa', 'tina', 'tricia']:
+            elif distro_version in ['bionic', 'tara', 'tessa', 'tina', 'tricia']:
                 distro_version = DistroVersion.UBUNTU_BIONIC
-            elif d[2] in ['cosmic']:
+            elif distro_version in ['cosmic']:
                 distro_version = DistroVersion.UBUNTU_COSMIC
-            elif d[2] in ['disco']:
+            elif distro_version in ['disco']:
                 distro_version = DistroVersion.UBUNTU_DISCO
-            elif d[2] in ['eoan']:
+            elif distro_version in ['eoan']:
                 distro_version = DistroVersion.UBUNTU_EOAN
+            elif distro_version in ['focal']:
+                distro_version = DistroVersion.UBUNTU_FOCAL
             elif d[1].startswith('6.'):
                 distro_version = DistroVersion.DEBIAN_SQUEEZE
             elif d[1].startswith('7.') or d[1].startswith('wheezy'):
@@ -236,6 +243,8 @@ Terminating.''', file=sys.stderr)
                 distro_version = DistroVersion.DEBIAN_BUSTER
             elif d[1].startswith('11.') or d[1].startswith('bullseye'):
                 distro_version = DistroVersion.DEBIAN_BULLSEYE
+            elif d[1] == 'unstable' and d[2] == 'sid':
+                distro_version = DistroVersion.DEBIAN_SID
             else:
                 raise FatalError("Distribution '%s' not supported" % str(d))
         elif d[0] in ['RedHat', 'Fedora', 'CentOS', 'Red Hat Enterprise Linux Server', 'CentOS Linux']:
@@ -272,6 +281,8 @@ Terminating.''', file=sys.stderr)
                 distro_version = DistroVersion.FEDORA_30
             elif d[1] == '31':
                 distro_version = DistroVersion.FEDORA_31
+            elif d[1] == '32':
+                distro_version = DistroVersion.FEDORA_32
             elif d[1].startswith('6.'):
                 distro_version = DistroVersion.REDHAT_6
             elif d[1].startswith('7.'):
@@ -508,10 +519,18 @@ def detect_qt5(platform, arch, is_universal):
         m.warning('QT5_PREFIX={!r} does not exist'.format(qt5_prefix))
         return (None, None)
     if qmake_path:
-        if is_universal and platform == Platform.ANDROID:
+        try:
+            qt_version = shell.check_output([qmake_path, '-query', 'QT_VERSION']).strip()
+            qt_version = [int(v) for v in qt_version.split('.')]
+        except CommandError as e:
+            m.warning('QMAKE={!r} failed to execute:\n{}'.format(str(qmake_path), str(e)))
+            qt_version = [0, 0]
+        if len(qt_version) >= 2 and qt_version[:2] < [5, 14] and \
+           is_universal and platform == Platform.ANDROID:
+            # require QT5_PREFIX before Qt 5.14 with android universal
             if not qt5_prefix:
                 m.warning('Please set QT5_PREFIX if you want to build '
-                          'the Qt5 plugin for android-universal')
+                          'the Qt5 plugin for android-universal with Qt < 5.14')
                 return (None, None)
         else:
             ret = _qmake_or_pkgdir(qmake_path)
@@ -519,6 +538,11 @@ def detect_qt5(platform, arch, is_universal):
                 return ret
     # qmake path is invalid, find pkgdir or qmake from qt5 prefix
     if platform == Platform.ANDROID:
+        # Qt => 5.14
+        ret = _qmake_or_pkgdir(os.path.join(qt5_prefix, 'android/bin/qmake'))
+        if ret != (None, None):
+            return ret
+        # Qt < 5.14
         if arch == Architecture.ARMv7:
             ret = _qmake_or_pkgdir(os.path.join(qt5_prefix, 'android_armv7/bin/qmake'))
         elif arch == Architecture.ARM64:
@@ -642,3 +666,104 @@ async def run_tasks(tasks, done_async=None):
     except Exception:
         await shutdown()
         raise
+
+
+class EnvVar:
+    @staticmethod
+    def is_path(var):
+        return var in ('LD_LIBRARY_PATH', 'PATH', 'MANPATH', 'INFOPATH',
+                'PKG_CONFIG_PATH', 'PKG_CONFIG_LIBDIR', 'GI_TYPELIB_PATH',
+                'XDG_DATA_DIRS', 'XDG_CONFIG_DIRS', 'GST_PLUGIN_PATH',
+                'GST_PLUGIN_PATH_1_0', 'PYTHONPATH', 'MONO_PATH', 'LIB',
+                'INCLUDE', 'PATHEXT')
+
+    @staticmethod
+    def is_arg(var):
+        return var in ('CFLAGS', 'CPPFLAGS', 'CXXFLAGS', 'LDFLAGS',
+                'OBJCFLAGS', 'OBJCXXFLAGS', 'OBJLDFLAGS', 'CCASFLAGS')
+
+    @staticmethod
+    def is_cmd(var):
+        return var in ('AR', 'AS', 'CC', 'CPP', 'CXX', 'DLLTOOL', 'GENDEF',
+                'LD', 'NM', 'OBJC', 'OBJCOPY', 'OBJCXX', 'PERL', 'PYTHON',
+                'RANLIB', 'RC', 'STRIP', 'WINDRES')
+
+
+class EnvValue(list):
+    '''
+    Env var value (list of strings) with an associated separator
+    '''
+
+    def __init__(self, sep, *values):
+        self.sep = sep
+        super().__init__(*values)
+
+    def get(self):
+        return str.join(self.sep, self)
+
+    @staticmethod
+    def from_key(key, value):
+        if EnvVar.is_path(key):
+            return EnvValuePath(value)
+        if EnvVar.is_arg(key):
+            return EnvValueArg(value)
+        if EnvVar.is_cmd(key):
+            return EnvValueCmd(value)
+        return EnvValueSingle(value)
+
+
+class EnvValueSingle(EnvValue):
+    '''
+    Env var with a single value
+    '''
+
+    def __init__(self, *values):
+        if len(values) == 1:
+            if not isinstance(values[0], list):
+                values = ([values[0]],)
+            elif len(values[0]) > 1:
+                raise ValueError('EnvValue can only have a single value, not multiple')
+        super().__init__(None, *values)
+
+    def __iadd__(self, new):
+        if len(self) != 0:
+            raise ValueError('In-place add not allowed for EnvValue {!r}'.format(self))
+        return super().__iadd__(new)
+
+    def get(self):
+        return self[0]
+
+
+class EnvValueArg(EnvValue):
+    '''
+    Env var containing a list of quoted arguments separated by space
+    '''
+
+    def __init__(self, *values):
+        if len(values) == 1 and not isinstance(values[0], list):
+            values = (shlex.split(values[0]),)
+        super().__init__(' ', *values)
+
+    def get(self):
+        return ' '.join([shlex.quote(x) for x in self])
+
+
+class EnvValueCmd(EnvValueArg):
+    '''
+    Env var containing a command and a list of arguments separated by space
+    '''
+
+    def __iadd__(self, new):
+        if isinstance(new, EnvValueCmd):
+            raise ValueError('In-place add not allowed for EnvValueCmd {!r} and EnvValueCmd {!r}'.format(self, new))
+        return super().__iadd__(new)
+
+
+class EnvValuePath(EnvValue):
+    '''
+    Env var containing a list of paths separated by os.pathsep, which is `:` or `;`
+    '''
+    def __init__(self, *values):
+        if len(values) == 1 and not isinstance(values[0], list):
+            values = (values[0].split(os.pathsep),)
+        super().__init__(os.pathsep, *values)

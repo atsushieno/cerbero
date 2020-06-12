@@ -11,17 +11,20 @@ class Recipe(custom.GStreamer):
                      'assrender': 'enabled',
                      'bz2': 'enabled',
                      'closedcaption': 'enabled',
+                     'dash': 'enabled',
                      'decklink': 'enabled',
                      'dtls': 'enabled',
                      'dts': 'enabled',
                      'hls': 'enabled',
                      'hls-crypto': 'openssl',
                      'kate': 'enabled',
+                     'ladspa': 'auto', # lrdf is optional
                      'libmms': 'enabled',
                      'openh264': 'enabled',
                      'openjpeg': 'enabled',
                      'opus': 'enabled',
                      'rtmp': 'enabled',
+                     'rtmp2': 'enabled',
                      'sbc': 'enabled',
                      'sctp': 'enabled',
                      'soundtouch': 'enabled',
@@ -63,7 +66,7 @@ class Recipe(custom.GStreamer):
                      'wildmidi': 'disabled',
                     }
     deps = ['gstreamer-1.0', 'gst-plugins-base-1.0', 'bzip2', 'libass',
-            'libkate', 'zlib', 'openh264', 'opus', 'librtmp',
+            'libkate', 'zlib', 'openh264', 'opus', 'librtmp', 'libxml2',
             'libsrtp', 'libdca', 'libmms', 'libdvdnav', 'libnice',
             'soundtouch', 'vo-aacenc', 'librsvg', 'openjpeg',
             'pango', 'spandsp', 'webrtc-audio-processing', 'sbc', 'ladspa',
@@ -292,6 +295,7 @@ class Recipe(custom.GStreamer):
     files_plugins_net = [
              'lib/gstreamer-1.0/libgstdtls%(mext)s',
              'lib/gstreamer-1.0/libgstnetsim%(mext)s',
+             'lib/gstreamer-1.0/libgstrtmp2%(mext)s',
              'lib/gstreamer-1.0/libgstsctp%(mext)s',
              'lib/gstreamer-1.0/libgstsdpelem%(mext)s',
              'lib/gstreamer-1.0/libgstsrtp%(mext)s',
@@ -302,6 +306,7 @@ class Recipe(custom.GStreamer):
     files_plugins_net_devel = [
              'lib/gstreamer-1.0/libgstdtls.a', 'lib/gstreamer-1.0/libgstdtls.la',
              'lib/gstreamer-1.0/libgstnetsim.a', 'lib/gstreamer-1.0/libgstnetsim.la',
+             'lib/gstreamer-1.0/libgstrtmp2.a', 'lib/gstreamer-1.0/libgstrtmp2.la',
              'lib/gstreamer-1.0/libgstsctp.a', 'lib/gstreamer-1.0/libgstsctp.la',
              'lib/gstreamer-1.0/libgstsdpelem.a', 'lib/gstreamer-1.0/libgstsdpelem.la',
              'lib/gstreamer-1.0/libgstsrtp.a', 'lib/gstreamer-1.0/libgstsrtp.la',
@@ -442,27 +447,30 @@ class Recipe(custom.GStreamer):
             self.append_env('CFLAGS', '-DGSTREAMER_GLIB_COCOA_NSAPPLICATION=1')
             self.append_env('OBJCFLAGS', '-DGSTREAMER_GLIB_COCOA_NSAPPLICATION=1')
 
-        if self.using_msvc():
-            # plugin is C++, library is Autotools
-            self.disable_plugin('soundtouch', 'effects', dep='soundtouch')
-            # Plugin is C++ and hence webrtc-audio-processing must also be
-            # built with MSVC, it uses Meson but it doesn't build:
-            # https://gitlab.freedesktop.org/pulseaudio/webrtc-audio-processing/issues/2
-            self.disable_plugin('webrtcdsp', 'effects', dep='webrtc-audio-processing')
-            # librsvg pulls in gdk-pixbuf, which must be built with MSVC
-            self.disable_plugin('rsvg', 'codecs', dep='librsvg')
-
         # Enable hardware codecs if variants are enabled
         self.enable_plugin('nvcodec', 'codecs', 'nvcodec', option='nvcodec')
         self.enable_plugin('msdk', 'codecs', 'intelmsdk', option='msdk')
 
+        # MediaFoundation can only be built with MSVC
+        self.enable_plugin('mediafoundation', 'sys', 'visualstudio', option='mediafoundation')
+
         if self.config.target_platform == Platform.WINDOWS:
+            self.meson_options['wasapi2'] = 'disabled'
             self.meson_options['wasapi'] = 'enabled'
             self.meson_options['d3dvideosink'] = 'enabled'
             self.meson_options['d3d11'] = 'enabled'
             self.meson_options['directsound'] = 'enabled'
             self.meson_options['winks'] = 'enabled'
             self.meson_options['winscreencap'] = 'enabled'
+            if self.using_msvc():
+                # plugin is C++, library is Autotools
+                self.disable_plugin('soundtouch', 'effects', dep='soundtouch')
+                # Plugin is C++ and hence webrtc-audio-processing must also be
+                # built with MSVC, it uses Meson but it doesn't build:
+                # https://gitlab.freedesktop.org/pulseaudio/webrtc-audio-processing/issues/2
+                self.disable_plugin('webrtcdsp', 'effects', dep='webrtc-audio-processing')
+                if self.config.msvc_version == 'vs14':
+                    self.disable_plugin('d3d11', 'sys')
 
         if self.config.target_platform in (Platform.LINUX, Platform.DARWIN, Platform.IOS):
             self.meson_options['shm'] = 'enabled'

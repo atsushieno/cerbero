@@ -45,8 +45,8 @@ def find_shlib_regex(config, libname, prefix, libdir, ext, regex):
     return matches
 
 def get_implib_dllname(config, path):
-    if config.msvc_toolchain_env and path.endswith('.lib'):
-        lib_exe = shutil.which('lib', path=config.msvc_toolchain_env['PATH'][0])
+    if config.msvc_env_for_toolchain and path.endswith('.lib'):
+        lib_exe = shutil.which('lib', path=config.msvc_env_for_toolchain['PATH'][0])
         if not lib_exe:
             raise FatalError('lib.exe not found, check cerbero configuration')
         try:
@@ -123,8 +123,8 @@ class FilesProvider(object):
     # UNIX shared libraries can have between 0 and 3 version components:
     # major, minor, micro. We don't use {m,n} here because we want to capture
     # all the matches.
-    _SO_REGEX = r'^lib{}\.so(\.[0-9]+)?(\.[0-9]+)?(\.[0-9]+)?$'
-    # Like _SO_REGEX but only libs with version number.
+    _ANDROID_SO_REGEX = r'^lib{}\.so(\.[0-9]+)?(\.[0-9]+)?(\.[0-9]+)?$'
+    # Like _ANDROID_SO_REGEX but only libs with version number.
     _LINUX_SO_REGEX = r'^lib{}\.so(\.[0-9]+)(\.[0-9]+)?(\.[0-9]+)?$'
     _DYLIB_REGEX = r'^lib{}(\.[0-9]+)?(\.[0-9]+)?(\.[0-9]+)?\.dylib$'
 
@@ -141,7 +141,7 @@ class FilesProvider(object):
             'mext': '.dll', 'smext': '.a', 'pext': '.pyd', 'srext': '.dll'},
         Platform.LINUX: {'bext': '', 'sregex': _LINUX_SO_REGEX, 'sdir': 'lib',
             'mext': '.so', 'smext': '.a', 'pext': '.so', 'srext': '.so'},
-        Platform.ANDROID: {'bext': '', 'sregex': _SO_REGEX, 'sdir': 'lib',
+        Platform.ANDROID: {'bext': '', 'sregex': _ANDROID_SO_REGEX, 'sdir': 'lib',
             'mext': '.so', 'smext': '.a', 'pext': '.so', 'srext': '.so'},
         Platform.DARWIN: {'bext': '', 'sregex': _DYLIB_REGEX, 'sdir': 'lib',
             'mext': '.so', 'smext': '.a', 'pext': '.so', 'srext': '.dylib'},

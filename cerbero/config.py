@@ -28,6 +28,7 @@ from cerbero import enums
 from cerbero.errors import FatalError, ConfigurationError
 from cerbero.utils import _, system_info, validate_packager, shell
 from cerbero.utils import to_unixpath, to_winepath, parse_file, detect_qt5
+from cerbero.utils import EnvVar, EnvValue
 from cerbero.utils import messages as m
 from cerbero.ide.vs.env import get_vs_year_version
 
@@ -69,42 +70,76 @@ def set_nofile_ulimit():
             print('Failed to increase file ulimit, you may see linker failures')
 
 class Variants(object):
-
+    # Variants that are booleans, and are unset when prefixed with 'no'
     __disabled_variants = ['x11', 'alsa', 'pulse', 'cdparanoia', 'v4l2',
-                           'gi', 'unwind', 'rpi', 'visualstudio', 'qt5',
+                           'gi', 'unwind', 'rpi', 'visualstudio', 'uwp', 'qt5',
                            'intelmsdk', 'nvcodec', 'python', 'werror', 'vaapi']
-    __enabled_variants = ['debug', 'testspackage']
-    __all_variants = __enabled_variants + __disabled_variants
+    __enabled_variants = ['debug', 'optimization', 'testspackage']
+    __bool_variants = __enabled_variants + __disabled_variants
+    # Variants that are `key: (values)`, with the first value in the tuple
+    # being the default
+    __mapping_variants = {'vscrt': ('auto', 'md', 'mdd')}
 
     def __init__(self, variants):
+        # Set default values
         for v in self.__enabled_variants:
             setattr(self, v, True)
         for v in self.__disabled_variants:
             setattr(self, v, False)
+        for v, choices in self.__mapping_variants.items():
+            setattr(self, v, choices[0])
+        self.override(variants)
+
+    def override(self, variants):
+        if not isinstance(variants, list):
+            variants = [variants]
+        # Set the configured values
         for v in variants:
-            if v.startswith('no'):
-                if v[2:] not in self.__all_variants:
-                    m.warning('Variant {} is unknown or obsolete'.format(v[2:]))
+            if '=' in v:
+                key, value = v.split('=', 1)
+                key = key.replace('-', '_')
+                if key not in self.__mapping_variants:
+                    raise AttributeError('Mapping variant {!r} is unknown'.format(key))
+                if value not in self.__mapping_variants[key]:
+                    raise AttributeError('Mapping variant {!r} value {!r} is unknown'.format(key, value))
+                setattr(self, key, value)
+            elif v.startswith('no'):
+                if v[2:] not in self.__bool_variants:
+                    m.warning('Variant {!r} is unknown or obsolete'.format(v[2:]))
                 setattr(self, v[2:], False)
             else:
-                if v not in self.__all_variants:
-                    m.warning('Variant {} is unknown or obsolete'.format(v))
+                if v not in self.__bool_variants:
+                    m.warning('Variant {!r} is unknown or obsolete'.format(v))
                 setattr(self, v, True)
+        # UWP implies Visual Studio
+        if self.uwp:
+            self.visualstudio = True
+        # Set auto mapping values based on other values
+        if self.vscrt == 'auto':
+            self.vscrt = 'md'
+            if self.debug and not self.optimization:
+                self.vscrt = 'mdd'
+
+    def __setattr__(self, attr, value):
+            if '-' in attr:
+                raise AssertionError('Variant name {!r} must not contain \'-\''.format(attr))
+            super().__setattr__(attr, value)
 
     def __getattr__(self, name):
-        try:
-            if name.startswith('no'):
-                return not object.__getattribute__(self, name[2:])
-            else:
-                return object.__getattribute__(self, name)
-        except Exception:
-            raise AttributeError("%s is not a known variant" % name)
+        if name.startswith('no') and name[2:] in self.bools():
+            return not getattr(self, name[2:])
+        if name in self.bools() or name in self.mappings():
+            return getattr(self, name)
+        raise AttributeError('No such variant called {!r}'.format(name))
 
     def __repr__(self):
         return '<Variants: {}>'.format(self.__dict__)
 
-    def all(self):
-        return sorted(self.__all_variants)
+    def bools(self):
+        return sorted(self.__bool_variants)
+
+    def mappings(self):
+        return sorted(self.__mapping_variants)
 
 
 class Config (object):
@@ -121,17 +156,18 @@ class Config (object):
                    'data_dir', 'min_osx_sdk_version', 'external_recipes',
                    'external_packages', 'use_ccache', 'force_git_commit',
                    'universal_archs', 'osx_target_sdk_version', 'variants',
-                   'build_tools_prefix', 'build_tools_sources',
+                   'build_tools_prefix', 'build_tools_sources', 'build_tools_logs',
                    'build_tools_cache', 'home_dir', 'recipes_commits',
                    'recipes_remotes', 'ios_platform', 'extra_build_tools',
                    'distro_packages_install', 'interactive', 'bash_completions',
                    'target_arch_flags', 'sysroot', 'isysroot',
                    'extra_lib_path', 'cached_sources', 'tools_prefix',
                    'ios_min_version', 'toolchain_path', 'mingw_perl_prefix',
-                   'msvc_version', 'msvc_toolchain_env', 'mingw_toolchain_env',
-                   'meson_cross_properties', 'manifest', 'extra_properties',
-                   'qt5_qmake_path', 'qt5_pkgconfigdir', 'for_shell',
-                   'package_tarball_compression', 'extra_mirrors',
+                   'msvc_env_for_toolchain', 'mingw_env_for_toolchain',
+                   'msvc_env_for_build_system', 'mingw_env_for_build_system',
+                   'msvc_version', 'meson_properties', 'manifest',
+                   'extra_properties', 'qt5_qmake_path', 'qt5_pkgconfigdir',
+                   'for_shell', 'package_tarball_compression', 'extra_mirrors',
                    'extra_bootstrap_packages', 'moltenvk_prefix',
                    'vs_install_path', 'vs_install_version']
 
@@ -154,15 +190,6 @@ class Config (object):
         c.target_arch = arch
         return c
 
-    def _is_env_multipath_key(self, key):
-        return key in ('LD_LIBRARY_PATH', 'PATH', 'MANPATH', 'INFOPATH',
-            'PKG_CONFIG_PATH', 'PKG_CONFIG_LIBDIR', 'GI_TYPELIB_PATH',
-             'XDG_DATA_DIRS', 'XDG_CONFIG_DIRS', 'GST_PLUGIN_PATH',
-             'GST_PLUGIN_PATH_1_0', 'PYTHONPATH', 'MONO_PATH')
-
-    def _is_env_multivalue_key(self, key):
-        return key in ('CFLAGS', 'CXXFLAGS', 'LDFLAGS', 'OBJCFLAGS', 'OBJCXXFLAGS')
-
     def can_use_msvc(self):
         if self.variants.visualstudio and self.msvc_version is not None:
             return True
@@ -172,16 +199,15 @@ class Config (object):
         if variants_override is None:
             variants_override = []
 
+        # Initialize variants
+        self.variants = Variants(variants_override)
+
         # First load the default configuration
         self.load_defaults()
 
         # Next parse the user configuration file USER_CONFIG_FILE
         # which overrides the defaults
         self._load_user_config()
-
-        # Ensure that Cerbero config files know about these variants, and that
-        # they override the values from the user configuration file above
-        self.variants += variants_override
 
         # Next, if a config file is provided use it to override the settings
         # again (set the target, f.ex.)
@@ -202,10 +228,6 @@ class Config (object):
                 # config again in the universal config.
                 for arch, config_file in list(self.universal_archs.items()):
                     arch_config[arch] = self._copy(arch)
-                    # Allow the config to detect whether this config is
-                    # running under a universal setup and some
-                    # paths/configuration need to change
-                    arch_config[arch].variants += ['universal']
                     if config_file is not None:
                         # This works because the override config files are
                         # fairly light. Things break if they are more complex
@@ -245,9 +267,7 @@ class Config (object):
                 config._validate_properties()
 
         # Ensure that variants continue to override all other configuration
-        self.variants += variants_override
-        # Build variants before copying any config
-        self.variants = Variants(self.variants)
+        self.variants.override(variants_override)
         if not self.prefix_is_executable() and self.variants.gi:
             m.warning(_("gobject introspection requires an executable "
                         "prefix, 'gi' variant will be removed"))
@@ -309,19 +329,21 @@ class Config (object):
         ret_env = {}
         for k in new_env.keys():
             new_v = new_env[k]
-            if isinstance(new_v, list):
-                # Toolchain env is in a different format
-                new_v = new_v[0]
+            # Must not accidentally use this with EnvValue objects
+            if isinstance(new_v, EnvValue):
+                raise AssertionError('{!r}: {!r}'.format(k, new_v))
             if k not in old_env or k in override_env:
                 ret_env[k] = new_v
                 continue
             old_v = old_env[k]
             if new_v == old_v:
                 ret_env[k] = new_v
-            elif self._is_env_multipath_key(k):
+            elif EnvVar.is_path(k):
                 ret_env[k] = self._join_path(new_v, old_v)
-            elif self._is_env_multivalue_key(k):
+            elif EnvVar.is_arg(k):
                 ret_env[k] = self._join_values(new_v, old_v)
+            elif EnvVar.is_cmd(k):
+                ret_env[k] = new_v
             else:
                 raise FatalError("Don't know how to combine the environment "
                     "variable '%s' with values '%s' and '%s'" % (k, new_v, old_v))
@@ -408,7 +430,7 @@ class Config (object):
             path = self._join_path(bindir, path)
 
         ld_library_path = os.path.join(self.build_tools_prefix, 'lib')
-        if not self.cross_compiling():
+        if self.prefix_is_executable():
             ld_library_path = self._join_path(libdir, ld_library_path)
         if self.extra_lib_path is not None:
             ld_library_path = self._join_path(ld_library_path, self.extra_lib_path)
@@ -453,15 +475,6 @@ class Config (object):
         if not self.cross_compiling():
             env['C_INCLUDE_PATH'] = includedir
             env['CPLUS_INCLUDE_PATH'] = includedir
-
-        # On Windows, we have a toolchain env that we need to set, but only
-        # when running as a shell
-        if self.platform == Platform.WINDOWS and self.for_shell:
-            if self.can_use_msvc():
-                toolchain_env = self.msvc_toolchain_env
-            else:
-                toolchain_env = self.mingw_toolchain_env
-            env = self._merge_env(env, toolchain_env)
 
         # merge the config env with this new env
         # LDFLAGS and PATH were already merged above
@@ -510,7 +523,7 @@ class Config (object):
         self.set_property('external_recipes', {})
         self.set_property('external_packages', {})
         self.set_property('universal_archs', None)
-        self.set_property('variants', [])
+        self.set_property('variants', None)
         self.set_property('build_tools_prefix', None)
         self.set_property('build_tools_sources', None)
         self.set_property('build_tools_cache', None)
@@ -519,7 +532,7 @@ class Config (object):
         self.set_property('extra_build_tools', [])
         self.set_property('distro_packages_install', True)
         self.set_property('interactive', m.console_is_interactive())
-        self.set_property('meson_cross_properties', {})
+        self.set_property('meson_properties', {})
         self.set_property('manifest', None)
         self.set_property('extra_properties', {})
         self.set_property('extra_mirrors', [])
@@ -557,6 +570,10 @@ class Config (object):
 
     def cross_compiling(self):
         "Are we building for the host platform or not?"
+        # Building for UWP is always cross-compilation since we can't run the
+        # binaries that we output
+        if self.variants.uwp:
+            return True
         # On Windows, building 32-bit on 64-bit is not cross-compilation since
         # 32-bit Windows binaries run on 64-bit Windows via WOW64.
         if self.platform == Platform.WINDOWS:
@@ -583,6 +600,9 @@ class Config (object):
         build env?"""
         if self.target_platform != self.platform:
             return False
+        # Executables built for UWP cannot be run as-is
+        if self.variants.uwp:
+            return False
         if self.target_arch != self.arch:
             if self.target_arch == Architecture.X86 and \
                     self.arch == Architecture.X86_64:
@@ -598,7 +618,7 @@ class Config (object):
         return self.target_distro_version >= distro_version
 
     def _parse(self, filename, reset=True):
-        config = {'os': os, '__file__': filename, 'env' : self.config_env,
+        config = {'os': os, '__file__': filename, 'env': self.config_env,
                   'cross': self.cross_compiling()}
         if not reset:
             for prop in self._properties:
@@ -670,10 +690,25 @@ class Config (object):
                 self._parse(config_path, reset=False)
 
     def _load_last_defaults(self):
+        # Set build tools defaults
+        self.set_property('build_tools_prefix',
+                os.path.join(self.home_dir, 'build-tools'))
+        self.set_property('build_tools_sources',
+                os.path.join(self.home_dir, 'sources', 'build-tools'))
+        self.set_property('build_tools_logs',
+                os.path.join(self.home_dir, 'logs', 'build-tools'))
+        self.set_property('build_tools_cache', 'build-tools.cache')
+        # Set target platform defaults
         target_platform = self.target_platform
-        if target_platform == Platform.WINDOWS:
-            if 'visualstudio' in self.variants:
-                target_platform = 'msvc'
+        if target_platform == Platform.WINDOWS and not self.prefix_is_build_tools():
+            if self.variants.visualstudio:
+                if self.variants.uwp:
+                    target_platform = 'uwp'
+                else:
+                    target_platform = 'msvc'
+                # Debug CRT needs a separate prefix
+                if self.variants.vscrt == 'mdd':
+                    target_platform += '-debug'
                 # Check for invalid configuration of a custom Visual Studio path
                 if self.vs_install_path and not self.vs_install_version:
                     raise ConfigurationError('vs_install_path was set, but vs_install_version was not')
@@ -693,11 +728,6 @@ class Config (object):
                 "%s_%s.cache" % (target_platform, self.target_arch))
         self.set_property('install_dir', self.prefix)
         self.set_property('local_sources', self._default_local_sources_dir())
-        self.set_property('build_tools_prefix',
-                os.path.join(self.home_dir, 'build-tools'))
-        self.set_property('build_tools_sources',
-                os.path.join(self.home_dir, 'sources', 'build-tools'))
-        self.set_property('build_tools_cache', 'build-tools.cache')
 
     def _find_data_dir(self):
         if self.uninstalled:

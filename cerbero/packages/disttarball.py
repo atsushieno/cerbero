@@ -88,10 +88,15 @@ class DistTarball(PackagerBase):
 
         if self.config.target_platform != Platform.WINDOWS:
             platform = self.config.target_platform
+        elif self.config.variants.uwp:
+            platform = 'uwp'
         elif self.config.variants.visualstudio:
             platform = 'msvc'
         else:
             platform = 'mingw'
+
+        if self.config.variants.visualstudio and self.config.variants.vscrt == 'mdd':
+            platform += '+debug'
 
         return "%s%s-%s-%s-%s%s.%s" % (self.package_prefix, self.package.name, platform,
                 self.config.target_arch, self.package.version, package_type, ext)

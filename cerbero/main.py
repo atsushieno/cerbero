@@ -18,13 +18,7 @@
 
 from cerbero import hacks
 
-try:
-    import argparse
-except ImportError as e:
-    print("Could not import argparse. Try installing it with "\
-          "'sudo easy_install argparse")
-    raise e
-
+import argparse
 import sys
 import errno
 import logging
@@ -112,7 +106,8 @@ class Main(object):
     def list_variants(self):
         if not self.args.list_variants:
             return
-        print('Available variants are: ' + ', '.join(self.config.variants.all()))
+        print('Available boolean variants are: ' + ', '.join(self.config.variants.bools()))
+        print('Available mapping variants are: ' + ', '.join(self.config.variants.mappings()))
         sys.exit(0)
 
     def self_update(self):

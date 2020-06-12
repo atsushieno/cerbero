@@ -24,6 +24,7 @@ from functools import lru_cache
 from cerbero.enums import Architecture
 from cerbero.errors import FatalError
 from cerbero.utils.shell import check_output
+from cerbero.utils import messages as m
 
 # We only support Visual Studio 2015 as of now
 VCVARSALLS = {
@@ -38,6 +39,7 @@ VCVARSALLS = {
             r'Microsoft Visual Studio\2017\Community',
             r'Microsoft Visual Studio\2017\Professional',
             r'Microsoft Visual Studio\2017\Enterprise',
+            r'Microsoft Visual Studio\2017\BuildTools',
             r'Microsoft Visual Studio\2017\Preview',
         ),
         r'VC\Auxiliary\Build\vcvarsall.bat'
@@ -82,6 +84,9 @@ def _get_custom_vs_install(vs_version, vs_install_path):
         raise FatalError('Can\'t find vcvarsall.bat inside vs_install_path {!r}'.format(path))
     return path.as_posix(), vs_version
 
+def _sort_vs_installs(installs):
+    return sorted(installs, reverse=True, key=lambda x: x['installationVersion'])
+
 def _get_vswhere_vs_install(vswhere, vs_versions):
     import json
     vswhere_exe = str(vswhere)
@@ -90,8 +95,8 @@ def _get_vswhere_vs_install(vswhere, vs_versions):
     # oldest, and including preview releases.
     # Will not include BuildTools installations.
     out = check_output([vswhere_exe, '-legacy', '-prerelease', '-format',
-                        'json', '-utf8', '-sort'])
-    installs = json.loads(out)
+                        'json', '-utf8'])
+    installs = _sort_vs_installs(json.loads(out))
     program_files = get_program_files_dir()
     for install in installs:
         version = install['installationVersion']
@@ -104,8 +109,9 @@ def _get_vswhere_vs_install(vswhere, vs_versions):
         # Find the location of the Visual Studio installation
         if path.is_file():
             return path.as_posix(), vs_version
-    raise FatalError('vswhere.exe could not find Visual Studio installation(s). '
-                     'Looked for version(s): ' + ', '.join(vs_versions))
+    m.warning('vswhere.exe could not find Visual Studio version(s) {}. Falling '
+              'back to manual searching...' .format(', '.join(vs_versions)))
+    return None
 
 def get_vcvarsall(vs_version, vs_install_path):
     known_vs_versions = sorted(VCVARSALLS.keys(), reverse=True)
@@ -133,7 +139,9 @@ def get_vcvarsall(vs_version, vs_install_path):
     # - Visual Studio 2019 Build Tools (cannot be found by vswhere)
     vswhere = program_files / 'Microsoft Visual Studio' / 'Installer' / 'vswhere.exe'
     if vswhere.is_file():
-        return _get_vswhere_vs_install(vswhere, vs_versions)
+        ret = _get_vswhere_vs_install(vswhere, vs_versions)
+        if ret is not None:
+            return ret
     # Look in the default locations if vswhere.exe is not available.
     for vs_version in vs_versions:
         prefixes, suffix = VCVARSALLS[vs_version]
@@ -143,7 +151,7 @@ def get_vcvarsall(vs_version, vs_install_path):
             if path.is_file():
                 return path.as_posix(), vs_version
     raise FatalError('Microsoft Visual Studio not found. If you installed it, '
-                     'please file a bug. We looked for: ' + ', '.join(versions))
+                     'please file a bug. We looked for: ' + ', '.join(vs_versions))
 
 def append_path(var, path, sep=';'):
     if var and not var.endswith(sep):
@@ -197,12 +205,14 @@ def get_envvar_msvc_values(msvc, nomsvc, sep=';'):
     return msvc[0:index]
 
 @lru_cache()
-def get_msvc_env(arch, target_arch, version=None, vs_install_path=None):
+def get_msvc_env(arch, target_arch, uwp, version=None, vs_install_path=None):
     ret_env = {}
     vcvarsall, vsver = get_vcvarsall(version, vs_install_path)
 
     without_msvc = run_and_get_env('set')
     arg = get_vcvarsall_arg(arch, target_arch)
+    if uwp:
+        arg += ' uwp'
     vcvars_env_cmd = '"{0}" {1} & {2}'.format(vcvarsall, arg, 'set')
     with_msvc = run_and_get_env(vcvars_env_cmd)
 

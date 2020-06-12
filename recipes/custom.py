@@ -6,7 +6,7 @@ from collections import defaultdict
 from cerbero.build import recipe
 from cerbero.build.source import SourceType
 from cerbero.build.cookbook import CookBook
-from cerbero.enums import Platform, License
+from cerbero.enums import Platform, License, FatalError
 from cerbero.utils import shell, to_unixpath
 
 class GStreamer(recipe.Recipe):
@@ -51,19 +51,38 @@ class GStreamer(recipe.Recipe):
         else:
             self.meson_options[option] = 'disabled'
 
+    def _remove_files_category_entry(self, files_category, entry):
+        if hasattr(self, files_category):
+            fc = getattr(self, files_category)
+            if entry in fc:
+                fc.remove(entry)
+                return
+        platform_files_category = 'platform_' + files_category
+        if hasattr(self, platform_files_category):
+            pf = getattr(self, platform_files_category)
+            if self.config.target_platform not in pf:
+                raise FatalError('plugin {!r} not found in category {!r}'.format(entry, files_category))
+            pfc = getattr(self, platform_files_category)[self.config.target_platform]
+            if entry in pfc:
+                pfc.remove(entry)
+                return
+        raise FatalError('{} not found in category {}'.format(entry, files_category))
+
+    def _remove_plugin_file(self, plugin, category):
+        plugin = 'lib/gstreamer-1.0/libgst' + plugin
+        plugin_shared_lib = plugin + '%(mext)s'
+        plugin_static_lib = plugin + '.a'
+        plugin_libtool_lib = plugin + '.la'
+        self._remove_files_category_entry('files_plugins_' + category, plugin_shared_lib)
+        self._remove_files_category_entry('files_plugins_{}_devel'.format(category), plugin_static_lib)
+        self._remove_files_category_entry('files_plugins_{}_devel'.format(category), plugin_libtool_lib)
+
     def disable_plugin(self, plugin, category, option=None, dep=None, library_name=None):
         if option is None:
             option = plugin
         if dep is not None and dep in self.deps:
             self.deps.remove(dep)
-        plugin = 'lib/gstreamer-1.0/libgst' + plugin
-        if hasattr(self, 'files_plugins_' + category):
-            f = getattr(self, 'files_plugins_' + category)
-            f.remove(plugin + '%(mext)s')
-        if hasattr(self, 'files_plugins_{}_devel'.format(category)):
-            d = getattr(self, 'files_plugins_{}_devel'.format(category))
-            d.remove(plugin + '.a')
-            d.remove(plugin + '.la')
+        self._remove_plugin_file(plugin, category)
         if library_name is not None:
             library = 'libgst' + library_name + '-1.0'
             self.files_libs.remove(library)
@@ -71,6 +90,9 @@ class GStreamer(recipe.Recipe):
             self.files_plugins_devel.remove(pcname)
             includedir = 'include/gstreamer-1.0/gst/' + library_name
             self.files_plugins_devel.remove(includedir)
+            libincdir = 'lib/gstreamer-1.0/include/gst/' + library_name
+            if libincdir in self.files_plugins_devel:
+                self.files_plugins_devel.remove(libincdir)
         self.meson_options[option] = 'disabled'
 
 

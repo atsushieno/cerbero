@@ -23,7 +23,7 @@ from cerbero.bootstrap import BootstrapperBase
 from cerbero.build.oven import Oven
 from cerbero.build.cookbook import CookBook
 from cerbero.commands.fetch import Fetch
-from cerbero.utils import _
+from cerbero.utils import _, shell
 from cerbero.errors import FatalError, ConfigurationError
 
 
@@ -51,13 +51,13 @@ class BuildTools (BootstrapperBase, Fetch):
             self.BUILD_TOOLS.append('cmake')
         if self.config.platform == Platform.LINUX:
             # dav1d requires nasm >=2.13.02
-            # We require cmake 3.10 for out-of-source-tree builds.
-            # RHEL 8, Ubuntu 18.04, and Debian Buster are fine.
-            if self.config.distro_version in (DistroVersion.REDHAT_6, DistroVersion.REDHAT_7,
-                                              DistroVersion.AMAZON_LINUX, DistroVersion.UBUNTU_XENIAL,
-                                              DistroVersion.DEBIAN_STRETCH):
-                self.BUILD_TOOLS.append('cmake')
-                self.BUILD_TOOLS.append('nasm')
+            # We require cmake > 3.10.2 for out-of-source-tree builds.
+            tool, found, newer = shell.check_tool_version('cmake' ,'3.10.2', env=None)
+            if not newer:
+              self.BUILD_TOOLS.append('cmake')
+            tool, found, newer = shell.check_tool_version('nasm', '2.13.02', env=None)
+            if not newer:
+              self.BUILD_TOOLS.append('nasm')
         if self.config.target_platform == Platform.IOS:
             self.BUILD_TOOLS.append('gas-preprocessor')
         if self.config.target_platform != Platform.LINUX and not \
@@ -81,11 +81,15 @@ class BuildTools (BootstrapperBase, Fetch):
         config.build_tools_prefix = self.config.build_tools_prefix
         config.sources = self.config.build_tools_sources
         config.build_tools_sources = self.config.build_tools_sources
+        config.logs = self.config.build_tools_logs
+        config.build_tools_logs = self.config.build_tools_logs
         config.cache_file = self.config.build_tools_cache
         config.build_tools_cache = self.config.build_tools_cache
         config.external_recipes = self.config.external_recipes
         config.extra_mirrors = self.config.extra_mirrors
         config.cached_sources = self.config.cached_sources
+        config.vs_install_path = self.config.vs_install_path
+        config.vs_install_version = self.config.vs_install_version
 
         if config.toolchain_prefix and not os.path.exists(config.toolchain_prefix):
             os.makedirs(config.toolchain_prefix)
@@ -93,6 +97,8 @@ class BuildTools (BootstrapperBase, Fetch):
             os.makedirs(config.prefix)
         if not os.path.exists(config.sources):
             os.makedirs(config.sources)
+        if not os.path.exists(config.logs):
+            os.makedirs(config.logs)
 
         config.do_setup_env()
         self.cookbook = CookBook(config, offline=self.offline)

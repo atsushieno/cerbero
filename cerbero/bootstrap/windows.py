@@ -100,11 +100,11 @@ class WindowsBootstrapper(BootstrapperBase):
     def start(self, jobs=0):
         if not git.check_line_endings(self.config.platform):
             raise ConfigurationError("git is configured to use automatic line "
-                    "endings conversion. You can fix it running:\n"
-                    "$git config core.autocrlf false")
+                    "endings conversion. Please change that by running:\n"
+                    "`git config --global core.autocrlf false` inside the MSYS shell")
         self.check_dirs()
-        self.fix_mingw()
         if self.platform == Platform.WINDOWS:
+            self.fix_mingw()
             self.fix_openssl_mingw_perl()
             self.fix_bin_deps()
             # FIXME: This uses the network
@@ -121,27 +121,19 @@ class WindowsBootstrapper(BootstrapperBase):
             os.makedirs(etc_path)
 
     def fix_mingw(self):
-        if self.arch == Architecture.X86:
-            try:
-                shutil.rmtree('/mingw/lib')
-            except Exception:
-                pass
-        if self.platform == Platform.WINDOWS:
-            # Tar does not create correctly the mingw symlink
-            sysroot = os.path.join(self.prefix, 'x86_64-w64-mingw32/sysroot')
-            mingwdir = os.path.join(sysroot, 'mingw')
-            # The first time the toolchain is extracted it creates a file with
-            # symlink
-            if not os.path.isdir(mingwdir):
-                os.remove(mingwdir)
-            # Otherwise we simply remove the directory and link back the sysroot
-            else:
-                shutil.rmtree(mingwdir)
-            shell.call('ln -s usr/x86_64-w64-mingw32 mingw', sysroot)
-            # In cross-compilation gcc does not create a prefixed cpp
-            cpp_exe = os.path.join(self.prefix, 'bin', 'cpp.exe')
-            host_cpp_exe = os.path.join(self.prefix, 'bin', 'x86_64-w64-mingw32-cpp.exe')
-            shutil.copyfile(cpp_exe, host_cpp_exe)
+        # On Windows, if the user is not allowed to create symbolic links or if
+        # the Python version is older than 3.8, tarfile creates an empty
+        # directory instead of creating a symlink. This affects the `mingw`
+        # dir which is supposed to be a symlink to `usr/x86_64-w64-mingw32`
+        sysroot = os.path.join(self.prefix, 'x86_64-w64-mingw32/sysroot')
+        mingwdir = os.path.join(sysroot, 'mingw')
+        if not os.path.islink(mingwdir) and os.path.isdir(mingwdir):
+            shutil.rmtree(mingwdir)
+        shell.symlink('usr/x86_64-w64-mingw32', 'mingw', sysroot)
+        # In cross-compilation gcc does not create a prefixed cpp
+        cpp_exe = os.path.join(self.prefix, 'bin', 'cpp.exe')
+        host_cpp_exe = os.path.join(self.prefix, 'bin', 'x86_64-w64-mingw32-cpp.exe')
+        shutil.copyfile(cpp_exe, host_cpp_exe)
 
     def fix_openssl_mingw_perl(self):
         '''
@@ -160,7 +152,7 @@ class WindowsBootstrapper(BootstrapperBase):
 
     def install_mingwget_deps(self):
         for dep in MINGWGET_DEPS:
-            shell.call('mingw-get install %s' % dep)
+            shell.new_call(['mingw-get', 'install', dep])
 
     def fix_bin_deps(self):
         # replace /opt/perl/bin/perl in intltool

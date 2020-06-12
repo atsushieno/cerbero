@@ -673,18 +673,24 @@ def which(pgm, path=None):
                 if os.path.exists(pext):
                     return pext
 
-def check_perl_version(needed, env):
-    perl = which('perl', env['PATH'])
+def check_tool_version(tool_name, needed, env):
+    found = False
+    newer = False
+    if env is None:
+        env = os.environ.copy()
+    tool = which(tool_name, env['PATH'])
+    if not tool:
+        return None, False, False
     try:
-        out = check_output([perl, '--version'], env=env)
+        out = check_output([tool, '--version'], env=env)
     except FatalError:
-        return None, None, None
-    m = re.search('v[0-9]+\.[0-9]+(\.[0-9]+)?', out)
-    if not m:
-        raise FatalError('Could not detect perl version')
-    found = m.group()[1:]
-    newer = StrictVersion(found) >= StrictVersion(needed)
-    return perl, found, newer
+        return None, False, False
+    m = re.search('([0-9]+\.[0-9]+(\.[0-9]+)?)', out)
+    if m:
+        found = m.groups()[0]
+        newer = StrictVersion(found) >= StrictVersion(needed)
+
+    return tool, found, newer
 
 def windows_proof_rename(from_name, to_name):
     '''
@@ -705,6 +711,24 @@ def windows_proof_rename(from_name, to_name):
     # Try one last time and throw an error if it fails again
     os.rename(from_name, to_name)
 
+def symlink(src, dst, working_dir=None):
+    prev_wd = os.getcwd()
+    if working_dir:
+        os.chdir(working_dir)
+    try:
+        os.symlink(src, dst)
+    except FileExistsError:
+        # Explicitly raise this, since FileExistsError is a subclass of OSError
+        # and would incorrectly trigger a copy below.
+        raise
+    except OSError:
+        # if symlinking fails, copy instead
+        if os.path.isdir(src):
+            copy_dir(src, dst)
+        else:
+            shutil.copy(src, dst)
+    finally:
+        os.chdir(prev_wd)
 
 class BuildStatusPrinter:
     def __init__(self, steps, interactive):

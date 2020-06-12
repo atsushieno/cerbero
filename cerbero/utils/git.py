@@ -32,16 +32,16 @@ def ensure_user_is_set(git_dir, logfile=None):
     # Set the user configuration for this repository so that Cerbero never warns
     # about it or errors out (it errors out with git-for-windows)
     try:
-        shell.call('%s config user.email' % GIT, logfile=logfile)
+        shell.new_call([GIT, 'config', 'user.email'], logfile=logfile)
     except FatalError:
-        shell.call('%s config user.email "cerbero@gstreamer.freedesktop.org"' %
-                   GIT, git_dir, logfile=logfile)
+        shell.new_call([GIT, 'config', 'user.email', 'cerbero@gstreamer.freedesktop.org'],
+                   git_dir, logfile=logfile)
 
     try:
-        shell.call('%s config user.name' % GIT, logfile=logfile)
+        shell.new_call([GIT, 'config', 'user.name'], logfile=logfile)
     except FatalError:
-        shell.call('%s config user.name "Cerbero Build System"' %
-                   GIT, git_dir, logfile=logfile)
+        shell.new_call([GIT, 'config', 'user.name', 'Cerbero Build System'],
+                   git_dir, logfile=logfile)
 
 def init(git_dir, logfile=None):
     '''
@@ -51,7 +51,7 @@ def init(git_dir, logfile=None):
     @type git_dir: str
     '''
     os.makedirs(git_dir, exist_ok=True)
-    shell.call('%s init' % GIT, git_dir, logfile=logfile)
+    shell.new_call([GIT, 'init'], git_dir, logfile=logfile)
     ensure_user_is_set(git_dir, logfile=logfile)
 
 
@@ -62,7 +62,7 @@ def clean(git_dir, logfile=None):
     @param git_dir: path of the git repository
     @type git_dir: str
     '''
-    return shell.call('%s clean -dfx' % GIT, git_dir, logfile=logfile)
+    return shell.new_call([GIT, 'clean', '-dfx'], git_dir, logfile=logfile)
 
 
 def list_tags(git_dir):
@@ -133,6 +133,8 @@ async def fetch(git_dir, fail=True, logfile=None):
     if ret != 0:
         return ret
     cmd.append('--tags')
+    # To avoid "would clobber existing tag" error
+    cmd.append('-f')
     return await shell.async_call(cmd, cmd_dir=git_dir, fail=fail, logfile=logfile, cpu_bound=False)
 
 async def submodules_update(git_dir, src_dir=None, fail=True, offline=False, logfile=None):
@@ -218,8 +220,8 @@ async def local_checkout(git_dir, local_git_dir, commit, logfile=None):
     @type commit: false
     '''
     branch_name = 'cerbero_build'
-    shell.call('%s checkout %s -B %s' % (GIT, commit, branch_name), local_git_dir, logfile=logfile)
-    shell.call('%s clone %s -s -b %s .' % (GIT, local_git_dir, branch_name),
+    await shell.async_call([GIT, 'checkout', commit, '-B', branch_name], local_git_dir, logfile=logfile)
+    await shell.async_call([GIT, 'clone', local_git_dir, '-s', '-b', branch_name, '.'],
                git_dir, logfile=logfile)
     ensure_user_is_set(git_dir, logfile=logfile)
     await submodules_update(git_dir, local_git_dir, logfile=logfile)
@@ -236,9 +238,9 @@ def add_remote(git_dir, name, url, logfile=None):
     @type url: str
     '''
     try:
-        shell.call('%s remote add %s %s' % (GIT, name, url), git_dir, logfile=logfile)
+        shell.new_call([GIT, 'remote', 'add', name, url], git_dir, logfile=logfile)
     except:
-        shell.call('%s remote set-url %s %s' % (GIT, name, url), git_dir, logfile=logfile)
+        shell.new_call([GIT, 'remote', 'set-url', name, url], git_dir, logfile=logfile)
 
 
 def check_line_endings(platform):
@@ -269,7 +271,7 @@ def init_directory(git_dir, logfile=None):
     '''
     init(git_dir, logfile=logfile)
     try:
-        shell.call('%s add --force -A .' % GIT, git_dir, logfile=logfile)
+        shell.new_call([GIT, 'add', '--force', '-A', '.'], git_dir, logfile=logfile)
         shell.call('%s commit -m "Initial commit" > /dev/null 2>&1' % GIT,
             git_dir, logfile=logfile)
     except:
@@ -286,4 +288,4 @@ def apply_patch(patch, git_dir, logfile=None):
     @param patch: path of the patch file
     @type patch: str
     '''
-    shell.call('%s am --ignore-whitespace %s' % (GIT, patch), git_dir, logfile=logfile)
+    shell.new_call([GIT, 'am', '--ignore-whitespace', patch], git_dir, logfile=logfile)
