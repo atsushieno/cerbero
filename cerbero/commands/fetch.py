@@ -65,7 +65,7 @@ class Fetch(Command):
         printer.total = len(fetch_recipes)
 
         async def fetch_print_wrapper(recipe_name, stepfunc):
-            printer.update_recipe_step(printer.count, printer.total, recipe_name, 'fetch')
+            printer.update_recipe_step(printer.count, recipe_name, 'fetch')
             await stepfunc()
             printer.count += 1
             printer.remove_recipe(recipe_name)
@@ -80,7 +80,7 @@ class Fetch(Command):
             if asyncio.iscoroutinefunction(stepfunc):
                 tasks.append(fetch_print_wrapper(recipe.name, stepfunc))
             else:
-                printer.update_recipe_step(printer.count, printer.total, recipe.name, 'fetch')
+                printer.update_recipe_step(printer.count, recipe.name, 'fetch')
                 stepfunc()
                 printer.count += 1
                 printer.remove_recipe(recipe.name)
@@ -128,7 +128,14 @@ class FetchRecipes(Fetch):
 
     def run(self, config, args):
         cookbook = CookBook(config)
-        return self.fetch(cookbook, args.recipes, args.no_deps,
+        recipes = []
+        for recipe in args.recipes:
+          found = cookbook.get_closest_recipe(recipe)
+          if found:
+            recipes.append(found)
+          else:
+            recipes.append(recipe)
+        return self.fetch(cookbook, recipes, args.no_deps,
                           args.reset_rdeps, args.full_reset, args.print_only, args.jobs)
 
 
