@@ -1,0 +1,9 @@
+class Package(custom.GStreamer, package.Package):
+
+    name = 'aap-deps'
+    shortdesc = 'AAP dependency libraries'
+    longdesc = 'AAP dependency libraries'
+    uuid = '304fe335-75e1-4b45-8bd1-9e2a5fee33fc'
+
+    files = ['libogg:*', 'libvorbis:*', 'flac:*', 'libsndfile:*']
+
