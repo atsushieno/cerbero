@@ -1,0 +1,18 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+import os
+import shutil
+
+class Recipe(recipe.Recipe):
+    """
+    Sets up build based on the fluidsynth library.
+    """
+    name = 'ADLplug'
+    version = '1.0.1'
+    licenses = [License.LGPLv2Plus]
+    btype = BuildType.CMAKE
+    remotes = {'origin': 'https://github.com/jpcima/ADLplug'}
+    commit = 'v1.0.1'
+    configure_options = '-DADLplug_Jack=off'
+    deps = ['lv2']
+

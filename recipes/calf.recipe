@@ -1,0 +1,21 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+import os
+import shutil
+
+class Recipe(recipe.Recipe):
+    """
+    Sets up build based on the calf library.
+    """
+    name = 'calf'
+    version = '0.90.3'
+    licenses = [License.GPLv2Plus]
+    btype = BuildType.AUTOTOOLS
+    remotes = {'origin': 'https://github.com/calf-studio-gear/calf'}
+    commit = '0.90.3'
+    deps = ['expat', 'fluidsynth', 'lv2']
+    config_sh = 'sh autogen.sh --without-obsolete-check'
+
+    def prepare(self):
+        if self.config.target_platform != Platform.LINUX and self.config.target_platform != Platform.ANDROID:
+            raise InvalidRecipeError(self, "Invalid platform")
