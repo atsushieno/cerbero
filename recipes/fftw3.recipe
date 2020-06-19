@@ -1,0 +1,17 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+from cerbero.utils import shell
+
+
+class Recipe(recipe.Recipe):
+    name = 'fftw3'
+    version = '3.3.8'
+    stype = SourceType.TARBALL
+    url = 'https://github.com/atsushieno/android-native-audio-builders/releases/download/r2/fftw-3.3.8.tar.xz'
+    tarball_checksum = 'ab51a5bd55aaa0242139bf1208530a74859b0f9779c0a883b2ec921a8f612000'
+    licenses = [{License.GPLv3Plus: ['COPYING']}]
+    tarball_dirname = 'fftw-%(version)s'
+    configure_options = '--enable-float'
+
+    files_libs = ['libfftw3', 'libfftw3f', 'libfftw3l', 'libfftw3q', 'libfftw3_omp', 'libfftw3f_omp', 'libfftw3l_omp', 'libfftw3q_omp', 'libfftw3_threads', 'libfftw3f_threads', 'libfftw3l_threads', 'libfftw3q_threads']
+    files_devel = ['include/fftw*']
+
