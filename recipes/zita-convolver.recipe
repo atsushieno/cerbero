@@ -1,0 +1,21 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+class Recipe(recipe.Recipe):
+    name = 'zita-convolver'
+    version = '4.0.3'
+    licenses = [{License.GPLv3Plus: ['COPYING']}]
+    btype = BuildType.CUSTOM
+    stype = SourceType.TARBALL
+    url = 'https://github.com/atsushieno/android-native-audio-builders/releases/download/r2/zita-convolver-4.0.3.tar.bz2'
+    tarball_checksum = '9aa11484fb30b4e6ef00c8a3281eebcfad9221e3937b1beb5fe21b748d89325f'
+    deps = ['fftw3']
+    patches = ['zita-convolver/zita-convolver-no-exceptions.patch']
+
+    def install(self):
+        shell.call ('cd ' + self.build_dir + '/source && CXX="' + self.get_env('CXX') + ' ' + self.get_env('CXXFLAGS') + ' -lstdc++" LDFLAGS="' + self.get_env('LDFLAGS') + '" make')
+        shell.call ('cp ' + self.build_dir + '/source/zita-convolver.h ' + self.config.prefix + '/include')
+        shell.call ('cp ' + self.build_dir + '/source/libzita-convolver.so.' + self.version + ' ' + self.config.prefix + '/lib/libzita-convolver.so')
+
+    def clean(self):
+        shell.call ('cd ' + self.build_dir + '/source && make clean')
+

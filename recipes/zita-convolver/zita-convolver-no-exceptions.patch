@@ -1,0 +1,136 @@
+From fd5183a847b0f958d1fa8ac8cc1d4f6166c384ab Mon Sep 17 00:00:00 2001
+From: = <atsushieno@dummy.com>
+Date: Sat, 20 Jun 2020 00:00:00 +0900
+Subject: [PATCH 01/01] Whee
+
+
+---
+
+diff --git a/source/Makefile b/source/Makefile
+index 776c067..3cbea36 100644
+--- a/source/Makefile
++++ b/source/Makefile
+@@ -34,7 +34,6 @@ VERSION = $(MAJVERS).$(MINVERS)
+ CPPFLAGS += -I. -D_REENTRANT -D_POSIX_PTHREAD_SEMANTICS
+ CPPFLAGS += -DENABLE_VECTOR_MODE 
+ CXXFLAGS += -fPIC -Wall -ffast-math -funroll-loops -O2
+-CXXFLAGS += -march=native
+ LDLFAGS += 
+ LDLIBS +=
+ 
+@@ -42,7 +41,7 @@ LDLIBS +=
+ ZITA-CONVOLVER_SO = libzita-convolver.so
+ ZITA-CONVOLVER_MAJ = $(ZITA-CONVOLVER_SO).$(MAJVERS)
+ ZITA-CONVOLVER_MIN = $(ZITA-CONVOLVER_MAJ).$(MINVERS)
+-ZITA-CONVOLVER_DEP = -lfftw3f -lpthread
++ZITA-CONVOLVER_DEP = -lfftw3f
+ ZITA-CONVOLVER_O = zita-convolver.o
+ ZITA-CONVOLVER_H = zita-convolver.h 
+ 
+
+diff --git a/source/zita-convolver.cc b/source/zita-convolver.cc
+index 202533d..0fe511b 100644
+--- a/source/zita-convolver.cc
++++ b/source/zita-convolver.cc
+@@ -22,6 +22,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <stdio.h>
++#include <assert.h>
+ #include "zita-convolver.h"
+ 
+ 
+@@ -45,7 +46,7 @@ float Convproc::_fft_cost = 5.0f;
+ static float *calloc_real (uint32_t k)
+ {
+     float *p = fftwf_alloc_real (k);
+-    if (!p) throw (Converror (Converror::MEM_ALLOC));
++    assert (p);
+     memset (p, 0, k * sizeof (float));
+     return p;
+ }
+@@ -53,7 +54,7 @@ static float *calloc_real (uint32_t k)
+ static fftwf_complex *calloc_complex (uint32_t k)
+ {
+     fftwf_complex *p = fftwf_alloc_complex (k);
+-    if (!p) throw (Converror (Converror::MEM_ALLOC));
++    assert (p);
+     memset (p, 0, k * sizeof (fftwf_complex));
+     return p;
+ }
+@@ -144,7 +145,7 @@ int Convproc::configure (uint32_t  ninp,
+ 	size <<= 1;
+     }
+ 
+-    try
++    //try
+     {
+ 	for (offs = pind = 0; offs < maxsize; pind++)
+ 	{
+@@ -180,11 +181,13 @@ int Convproc::configure (uint32_t  ninp,
+ 	for (i = 0; i < ninp; i++) _inpbuff [i] = new float [_inpsize];
+ 	for (i = 0; i < nout; i++) _outbuff [i] = new float [_minpart];
+     }
++	/*
+     catch (...)
+     {
+ 	cleanup ();
+ 	return Converror::MEM_ALLOC;
+     }
++	*/
+ 
+     _state = ST_STOP;
+     return 0;
+@@ -202,18 +205,20 @@ int Convproc::impdata_create (uint32_t  inp,
+ 
+     if (_state != ST_STOP) return Converror::BAD_STATE;
+     if ((inp >= _ninp) || (out >= _nout)) return Converror::BAD_PARAM;
+-    try
++    // try
+     {
+         for (j = 0; j < _nlevels; j++)
+ 	{
+             _convlev [j]->impdata_write (inp, out, step, data, ind0, ind1, true);
+ 	}
+     }
++	/*
+     catch (...)
+     {
+ 	cleanup ();
+ 	return Converror::MEM_ALLOC;
+     }
++	*/
+     return 0;
+ }
+ 
+@@ -258,18 +263,20 @@ int Convproc::impdata_link (uint32_t inp1,
+     if ((inp2 >= _ninp) || (out2 >= _nout)) return Converror::BAD_PARAM;
+     if ((inp1 == inp2) && (out1 == out2)) return Converror::BAD_PARAM;
+     if (_state != ST_STOP) return Converror::BAD_STATE;
+-    try
++    //try
+     {
+         for (j = 0; j < _nlevels; j++)
+ 	{
+             _convlev [j]->impdata_link (inp1, out1, inp2, out2);
+ 	}
+     }
++	/*
+     catch (...)
+     {
+ 	cleanup ();
+ 	return Converror::MEM_ALLOC;
+     }
++	*/
+     return 0;
+ }
+ 
+@@ -454,7 +461,7 @@ void Convlevel::configure (int       prio,
+     _plan_r2c = fftwf_plan_dft_r2c_1d (2 * _parsize, _time_data, _freq_data, fftwopt);
+     _plan_c2r = fftwf_plan_dft_c2r_1d (2 * _parsize, _freq_data, _time_data, fftwopt);
+     if (_plan_r2c && _plan_c2r) return;
+-    throw (Converror (Converror::MEM_ALLOC));
++    assert (false);
+ }
+ 
+ 
