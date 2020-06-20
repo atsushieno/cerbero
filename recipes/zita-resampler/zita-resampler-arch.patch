@@ -1,0 +1,21 @@
+From fd5183a847b0f958d1fa8ac8cc1d4f6166c384ab Mon Sep 17 00:00:00 2001
+From: = <atsushieno@dummy.com>
+Date: Sat, 20 Jun 2020 00:00:00 +0900
+Subject: [PATCH 01/01] Whee
+
+
+---
+
+diff --git a/source/Makefile b/source/Makefile
+index cd54ff5..8b92f6f 100644
+--- a/source/Makefile
++++ b/source/Makefile
+@@ -33,7 +33,6 @@ DISTDIR = zita-resampler-$(VERSION)
+ 
+ CPPFLAGS += -I. -D_REENTRANT -D_POSIX_PTHREAD_SEMANTICS
+ CXXFLAGS += -Wall -fPIC -O2 -ffast-math
+-CXXFLAGS += -march=native
+ LDFLAGS += 
+ LDLIBS +=
+ 
+
