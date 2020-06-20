@@ -1,0 +1,15 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+import shlex
+import shutil
+from cerbero.tools.libtool import LibtoolLibrary
+from cerbero.tools.libtool import get_libtool_versions
+
+class Recipe(recipe.Recipe):
+    name = 'libsigc++'
+    version = '2.10.3'
+    stype = SourceType.TARBALL
+    url = 'gnome://'
+    tarball_checksum = '0b68dfc6313c6cc90ac989c6d722a1bf0585ad13846e79746aa87cb265904786'
+    licenses = [License.LGPLv2Plus]
+    btype = BuildType.MESON
+    deps = ['mm-common']

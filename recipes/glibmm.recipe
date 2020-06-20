@@ -1,0 +1,15 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+import shlex
+import shutil
+from cerbero.tools.libtool import LibtoolLibrary
+from cerbero.tools.libtool import get_libtool_versions
+
+class Recipe(recipe.Recipe):
+    name = 'glibmm'
+    version = '2.62.0'
+    stype = SourceType.TARBALL
+    url = 'gnome://'
+    tarball_checksum = '36659f13cc73282392d1305858f3bbca46fbd1ce2f078cc9db8b9f79b2e93cfe'
+    licenses = [License.LGPLv2Plus]
+    deps = ['glib', 'libsigc++']
+

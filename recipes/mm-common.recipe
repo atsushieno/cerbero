@@ -1,0 +1,15 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+import shlex
+import shutil
+from cerbero.tools.libtool import LibtoolLibrary
+from cerbero.tools.libtool import get_libtool_versions
+
+class Recipe(recipe.Recipe):
+    name = 'mm-common'
+    version = '1.0.1'
+    stype = SourceType.TARBALL
+    url = 'gnome://'
+    tarball_checksum = '28a2d775afbf05c5c957b24b220ed6e9b2023179b98ecde471d89e9754ea5ac9'
+    licenses = [License.LGPLv2Plus]
+    btype = BuildType.MESON
+
