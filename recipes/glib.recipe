@@ -29,7 +29,7 @@ class Recipe(recipe.Recipe):
     licenses = [License.LGPLv2Plus]
     btype = BuildType.MESON
     meson_options = {'internal_pcre': 'true', 'libmount': 'false', 'dtrace': 'false',
-                     'iconv': 'auto'}
+                     'iconv': 'libc'}
     deps = ['libffi', 'zlib']
 
     patches = [
@@ -122,8 +122,8 @@ class Recipe(recipe.Recipe):
             self.deps.append('proxy-libintl')
 
         # Android only provides libiconv with API level >=28 (Pie and newer)
-        if self.config.target_platform == Platform.ANDROID:
-            self.deps.append('libiconv')
+        #if self.config.target_platform == Platform.ANDROID:
+        #    self.deps.append('libiconv')
 
         if self.config.target_platform == Platform.WINDOWS:
             # Want secure versions of stdlib functions. Glib already defines
