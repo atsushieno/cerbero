@@ -11,5 +11,11 @@ class Recipe(recipe.Recipe):
     url = 'gnome://'
     tarball_checksum = '0b68dfc6313c6cc90ac989c6d722a1bf0585ad13846e79746aa87cb265904786'
     licenses = [License.LGPLv2Plus]
-    btype = BuildType.MESON
-    deps = ['mm-common']
+    btype = BuildType.AUTOTOOLS
+    deps = ['gnustl', 'mm-common']
+
+    def prepare(self):
+        self.append_env('LDFLAGS', '-lc++_shared')
+        self.set_env('CXXFLAGS', self.get_env('CXXFLAGS').replace('-fno-exceptions', ''))
+        super().prepare()
+
