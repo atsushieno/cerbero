@@ -144,6 +144,8 @@ class ModifyEnvBase:
     '''
 
     use_system_libs = False
+    # Use the outdated MSYS perl instead of the new perl downloaded in bootstrap
+    use_msys_perl = False
 
     def __init__(self):
         # An array of #EnvVarOp operations that will be performed sequentially
@@ -249,6 +251,11 @@ class ModifyEnvBase:
         '''
         Modifies the build environment by inserting env vars from new_env
         '''
+        # If requested, remove the new mingw-perl downloaded in bootstrap from
+        # PATH and use the MSYS Perl instead
+        if self.config.platform == Platform.WINDOWS and self.use_msys_perl:
+            mingw_perl_bindir = Path(self.config.mingw_perl_prefix) / 'bin'
+            self.remove_env('PATH', mingw_perl_bindir.as_posix(), sep=os.pathsep)
         # Don't modify env again if already did it once for this function call
         if self._old_env:
             return
@@ -328,10 +335,14 @@ class Build(object):
         return True
 
     def using_uwp(self):
-        if not self.using_msvc():
-            return False
         if not self.config.variants.uwp:
             return False
+        # When the uwp variant is enabled, we must never select recipes that
+        # don't have can_msvc = True
+        if not self.can_msvc:
+            raise RuntimeError("Tried to build a recipe that can't use MSVC when using UWP")
+        if not self.config.variants.visualstudio:
+            raise RuntimeError("visualstudio variant wasn't set when uwp variant was set")
         return True
 
     async def configure(self):
@@ -401,12 +412,11 @@ class MakefilesBase (Build, ModifyEnvBase):
         if not self.using_msvc():
             self.setup_buildtype_env_ops()
 
-        self.config_src_dir = os.path.abspath(os.path.join(self.build_dir,
-                                                           self.srcdir))
         if self.requires_non_src_build:
             self.make_dir = os.path.join (self.config_src_dir, "cerbero-build-dir")
         else:
-            self.make_dir = self.config_src_dir
+            self.make_dir = os.path.abspath(os.path.join(self.config_src_dir,
+                                                           self.srcdir))
 
         self.make = self.make or ['make', 'V=1']
         self.make_install = self.make_install or ['make', 'install']
@@ -556,6 +566,10 @@ class Autotools (MakefilesBase):
             await shell.async_call(self.autoreconf_sh, self.config_src_dir,
                                    logfile=self.logfile, env=self.env)
 
+        # We don't build libtool on Windows
+        if self.config.platform == Platform.WINDOWS:
+            self.override_libtool = False
+
         # Use our own config.guess and config.sub
         config_datadir = os.path.join(self.config._relative_path('data'), 'autotools')
         cfs = {'config.guess': config_datadir, 'config.sub': config_datadir}
@@ -614,8 +628,8 @@ class CMake (MakefilesBase):
     config_sh_needs_shell = False
     config_sh = 'cmake'
     configure_tpl = '%(config-sh)s -DCMAKE_INSTALL_PREFIX=%(prefix)s ' \
-                    '-H%(build_dir)s ' \
-                    '-B%(make_dir)s ' \
+                    '-H%(make_dir)s ' \
+                    '-B%(build_dir)s ' \
                     '-DCMAKE_LIBRARY_OUTPUT_PATH=%(libdir)s ' \
                     '-DCMAKE_INSTALL_LIBDIR=lib ' \
                     '-DCMAKE_INSTALL_BINDIR=bin ' \
@@ -626,7 +640,8 @@ class CMake (MakefilesBase):
 
     def __init__(self):
         MakefilesBase.__init__(self)
-        self.make_dir = os.path.join(self.build_dir, '_builddir')
+        self.build_dir = os.path.join(self.build_dir, '_builddir')
+
 
     @modify_environment
     async def configure(self):
@@ -643,6 +658,8 @@ class CMake (MakefilesBase):
 
         if self.configure_options:
             self.configure_options = self.configure_options.split()
+        else:
+            self.configure_options = []
 
         if self.config.target_platform == Platform.WINDOWS:
             self.configure_options += ['-DCMAKE_SYSTEM_NAME=Windows']
@@ -673,6 +690,8 @@ class CMake (MakefilesBase):
             shutil.rmtree(cmake_files)
         self.make += ['VERBOSE=1']
         await MakefilesBase.configure(self)
+        # as build_dir is different from source dir, makefile location will be in build_dir.
+        self.make_dir = self.build_dir
 
 MESON_FILE_TPL = \
 '''
@@ -763,7 +782,7 @@ class Meson (Build, ModifyEnvBase) :
             return
         opt_name = None
         opt_type = None
-        with open(meson_options, 'r') as f:
+        with open(meson_options, 'r', encoding='utf-8') as f:
             options = f.read()
             # iterate over all option()s individually
             option_regex = "option\s*\(\s*(?:'(?P<name>[^']+)')\s*,\s*(?P<entry>(?P<identifier>[a-zA-Z0-9]+)\s*:\s*(?:(?P<string>'[^']+')|[^'\),\s]+)\s*,?\s*)+\)"
@@ -848,8 +867,8 @@ class Meson (Build, ModifyEnvBase) :
 
         cc = build_env.pop('CC')
         cxx = build_env.pop('CXX')
-        objc = build_env.pop('OBJC', [])
-        objcxx = build_env.pop('OBJCXX', [])
+        objc = build_env.pop('OBJC', ['false'])
+        objcxx = build_env.pop('OBJCXX', ['false'])
         ar = build_env.pop('AR')
         # We currently don't set the pre-processor or the linker when building with meson
         build_env.pop('CPP', None)
@@ -929,8 +948,8 @@ class Meson (Build, ModifyEnvBase) :
             cc = self.config.mingw_env_for_build_system['CC']
             cxx = self.config.mingw_env_for_build_system['CXX']
             ar = self.config.mingw_env_for_build_system['AR']
-            objc = cc
-            objcxx = cxx
+            objc = false
+            objcxx = false
         elif self.config.platform == Platform.DARWIN:
             cc = ['clang']
             cxx = ['clang++']
@@ -987,7 +1006,7 @@ class Meson (Build, ModifyEnvBase) :
 
     def _write_meson_file(self, contents, fname):
         fpath = os.path.join(self.meson_dir, fname)
-        with open(fpath, 'w') as f:
+        with open(fpath, 'w', encoding='utf-8') as f:
             f.write(contents)
         return fpath
 

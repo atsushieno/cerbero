@@ -19,6 +19,9 @@
 from cerbero.errors import FatalError
 
 
+# Safest place to define this since this file imports very few modules
+CERBERO_VERSION = '1.19.0.1'
+
 class Platform:
     ''' Enumeration of supported platforms '''
     LINUX = 'linux'
@@ -111,6 +114,7 @@ class DistroVersion:
     FEDORA_30 = 'fedora_30'
     FEDORA_31 = 'fedora_31'
     FEDORA_32 = 'fedora_32'
+    # further fedora versions are generated automatically
     REDHAT_6 = 'redhat_6'
     REDHAT_7 = 'redhat_7'
     REDHAT_8 = 'redhat_8'
@@ -135,6 +139,7 @@ class DistroVersion:
     OS_X_HIGH_SIERRA = 'osx_high_sierra'
     OS_X_MOJAVE = 'osx_mojave'
     OS_X_CATALINA = 'osx_catalina'
+    OS_X_BIG_SUR = 'osx_big_sur'
     IOS_8_0 = 'ios_08_0'
     IOS_8_1 = 'ios_08_1'
     IOS_8_2 = 'ios_08_2'

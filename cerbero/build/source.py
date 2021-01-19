@@ -141,17 +141,26 @@ class BaseTarball(object):
 
     @cvar tarball_checksum: sha256 checksum for the tarball
     @type tarball_checksum: str
+
+    @cvar tarball_name: the name to save the url as
+    @type tarball_name: str
+
+    @cvar tarball_dirname: the directory that the tarball contents will extract to
+    @type tarball_dirname: str
+
+    @cvar tarball_is_bomb: the tarball is a tarbomb and will extract contents into the current directory
+    @type tarball_is_bomb: bool
     '''
 
     url = None
     tarball_name = None
     tarball_dirname = None
+    tarball_is_bomb = False
     tarball_checksum = None
 
     def __init__(self):
         if not self.tarball_name:
             self.tarball_name = os.path.basename(self.url)
-        self.download_path = os.path.join(self.download_dir, self.tarball_name)
         # URL-encode spaces and other special characters in the URL's path
         split = list(urllib.parse.urlsplit(self.url))
         split[2] = urllib.parse.quote(split[2])
@@ -160,23 +169,31 @@ class BaseTarball(object):
         if o.scheme in ('http', 'ftp'):
             raise FatalError('Download URL {!r} must use HTTPS'.format(self.url))
 
+    def _get_download_path(self):
+        '''
+        Fetch download path dynamically because self.tarball_name may be
+        reset in prepare()
+        '''
+        return os.path.join(self.download_dir, self.tarball_name)
+
     async def fetch(self, redownload=False):
+        fname = self._get_download_path()
         if self.offline:
-            if not os.path.isfile(self.download_path):
+            if not os.path.isfile(fname):
                 msg = 'Offline mode: tarball {!r} not found in local sources ({})'
                 raise FatalError(msg.format(self.tarball_name, self.download_dir))
-            self.verify(self.download_path)
-            m.action(_('Found %s at %s') % (self.url, self.download_path), logfile=get_logfile(self))
+            self.verify(fname)
+            m.action(_('Found %s at %s') % (self.url, fname), logfile=get_logfile(self))
             return
         if not os.path.exists(self.download_dir):
             os.makedirs(self.download_dir)
         # Enable certificate checking only on Linux for now
         # FIXME: Add more platforms here after testing
         cc = self.config.platform == Platform.LINUX
-        await shell.download(self.url, self.download_path, check_cert=cc,
+        await shell.download(self.url, fname, check_cert=cc,
             overwrite=redownload, logfile=get_logfile(self),
             mirrors= self.config.extra_mirrors + DEFAULT_MIRRORS)
-        self.verify(self.download_path)
+        self.verify(fname)
 
     @staticmethod
     def _checksum(fname):
@@ -205,7 +222,7 @@ class BaseTarball(object):
         return True
 
     async def extract_tarball(self, unpack_dir):
-        fname = self.download_path
+        fname = self._get_download_path()
         logfile = get_logfile(self)
         try:
             await shell.unpack(fname, unpack_dir, logfile=logfile)
@@ -240,6 +257,7 @@ class Tarball(BaseTarball, Source):
         BaseTarball.__init__(self)
 
     async def fetch(self, redownload=False):
+        fname = self._get_download_path()
         if not os.path.exists(self.download_dir):
             os.makedirs(self.download_dir)
 
@@ -247,8 +265,8 @@ class Tarball(BaseTarball, Source):
                                    self.package_name, self.tarball_name)
         if not redownload and os.path.isfile(cached_file) and self.verify(cached_file, fatal=False):
             m.action(_('Copying cached tarball from %s to %s instead of %s') %
-                     (cached_file, self.download_path, self.url), logfile=get_logfile(self))
-            shutil.copy(cached_file, self.download_path)
+                     (cached_file, fname, self.url), logfile=get_logfile(self))
+            shutil.copy(cached_file, fname)
             return
         await super().fetch(redownload=redownload)
 
@@ -256,20 +274,25 @@ class Tarball(BaseTarball, Source):
         m.action(_('Extracting tarball to %s') % self.build_dir, logfile=get_logfile(self))
         if os.path.exists(self.build_dir):
             shutil.rmtree(self.build_dir)
-        await self.extract_tarball(self.config.sources)
+
+        unpack_dir = self.config.sources
+        if self.tarball_is_bomb:
+            unpack_dir = self.build_dir
+        await self.extract_tarball(unpack_dir)
+
         if self.tarball_dirname is not None:
-            extracted = os.path.join(self.config.sources, self.tarball_dirname)
+            extracted = os.path.join(unpack_dir, self.tarball_dirname)
             # Since we just extracted this, a Windows anti-virus might still
             # have a lock on files inside it.
             shell.windows_proof_rename(extracted, self.build_dir)
-        git.init_directory(self.build_dir, logfile=get_logfile(self))
+        git.init_directory(self.config_src_dir, logfile=get_logfile(self))
         for patch in self.patches:
             if not os.path.isabs(patch):
                 patch = self.relative_path(patch)
             if self.strip == 1:
-                git.apply_patch(patch, self.build_dir, logfile=get_logfile(self))
+                git.apply_patch(patch, self.config_src_dir, logfile=get_logfile(self))
             else:
-                shell.apply_patch(patch, self.build_dir, self.strip, logfile=get_logfile(self))
+                shell.apply_patch(patch, self.config_src_dir, self.strip, logfile=get_logfile(self))
 
 
 class GitCache (Source):

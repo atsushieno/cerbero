@@ -63,9 +63,9 @@ class Package(Command):
                 default=False, help=_('Use only the source cache, no network')),
             ArgparseArgument('--dry-run', action='store_true',
                 default=False, help=_('Only print the packages that will be built')),
-            ArgparseArgument('--xz', action='store_true',
-                default=False, help=_('Use xz instead of bzip2 for compression if '
-                    'creating a tarball')),
+            ArgparseArgument('--compress-method', type=str,
+                choices=['default', 'xz', 'bz2'], default='default',
+                help=_('Select compression method for tarballs')),
             ArgparseArgument('--jobs', '-j', action='store', type=int,
                 default=0, help=_('How many recipes to build concurrently. '
                     '0 = number of CPUs.')),
@@ -85,23 +85,33 @@ class Package(Command):
         if args.only_build_deps or args.dry_run:
             return
 
-        if args.xz:
-            config.package_tarball_compression = 'xz'
+        if args.compress_method != 'default':
+            m.message('Forcing tarball compression method as ' + args.compress_method)
+            config.package_tarball_compression = args.compress_method
 
         if p is None:
             raise PackageNotFoundError(args.package[0])
+
         p.pre_package()
+        packager_class = Packager
         if args.tarball:
             if config.target_platform == Platform.ANDROID and \
                config.target_arch == Architecture.UNIVERSAL:
-                pkg = AndroidPackager(config, p, self.store)
+                packager_class = AndroidPackager
             else:
-                pkg = DistTarball(config, p, self.store)
-        else:
-            pkg = Packager(config, p, self.store)
+                packager_class = DistTarball
+        elif config.variants.uwp:
+            # Split devel/runtime packages are useless for UWP since we will
+            # need both when building the package, and all needed runtime DLLs
+            # are packaged with the app as assets.
+            m.warning('Forcing single-tarball output for UWP package')
+            args.no_split = True
+            packager_class = DistTarball
+
         m.action(_("Creating package for %s") % p.name)
+        pkg = packager_class(config, p, self.store)
         output_dir = os.path.abspath(args.output_dir)
-        if args.tarball:
+        if isinstance(pkg, DistTarball):
             paths = pkg.pack(output_dir, args.no_devel, args.force,
                              args.keep_temp, split=not args.no_split,
                              strip_binaries=p.strip)

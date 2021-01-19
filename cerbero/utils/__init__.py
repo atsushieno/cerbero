@@ -20,6 +20,7 @@ import os
 import sys
 import shlex
 import shutil
+import argparse
 try:
     import sysconfig
 except:
@@ -52,6 +53,21 @@ class ArgparseArgument(object):
 
     def add_to_parser(self, parser):
         parser.add_argument(*self.name, **self.args)
+
+
+class StoreBool(argparse.Action):
+
+    def __init__(self, option_strings, dest, nargs=None, **kwargs):
+        super().__init__(option_strings, dest, **kwargs)
+
+    def __call__(self, parser, namespace, value, option_string=None):
+        if value == 'yes':
+            bvalue = True
+        elif value == 'no':
+            bvalue = False
+        else:
+            raise AssertionError
+        setattr(namespace, self.dest, bvalue)
 
 
 def user_is_root():
@@ -187,7 +203,7 @@ Terminating.''', file=sys.stderr)
                                     version = v.strip('"')
                         d = (name, version, '');
 
-        if d[0] in ['Ubuntu', 'debian', 'Debian GNU/Linux', 'LinuxMint']:
+        if d[0] in ['Ubuntu', 'debian', 'Debian GNU/Linux', 'LinuxMint', 'Linux Mint']:
             distro = Distro.DEBIAN
             distro_version = d[2].lower()
             split_str = d[2].split()
@@ -229,7 +245,7 @@ Terminating.''', file=sys.stderr)
                 distro_version = DistroVersion.UBUNTU_DISCO
             elif distro_version in ['eoan']:
                 distro_version = DistroVersion.UBUNTU_EOAN
-            elif distro_version in ['focal']:
+            elif distro_version in ['focal', 'ulyana']:
                 distro_version = DistroVersion.UBUNTU_FOCAL
             elif d[1].startswith('6.'):
                 distro_version = DistroVersion.DEBIAN_SQUEEZE
@@ -283,6 +299,10 @@ Terminating.''', file=sys.stderr)
                 distro_version = DistroVersion.FEDORA_31
             elif d[1] == '32':
                 distro_version = DistroVersion.FEDORA_32
+            elif d[0] == 'Fedora':
+                # str(int()) is for ensuring that the fedora version is
+                # actually a number
+                distro_version = 'fedora_' + str(int(d[1]))
             elif d[1].startswith('6.'):
                 distro_version = DistroVersion.REDHAT_6
             elif d[1].startswith('7.'):
@@ -333,7 +353,9 @@ Terminating.''', file=sys.stderr)
     elif platform == Platform.DARWIN:
         distro = Distro.OS_X
         ver = pplatform.mac_ver()[0]
-        if ver.startswith('10.15'):
+        if ver.startswith(('11.0', '10.16')):
+            distro_version = DistroVersion.OS_X_BIG_SUR
+        elif ver.startswith('10.15'):
             distro_version = DistroVersion.OS_X_CATALINA
         elif ver.startswith('10.14'):
             distro_version = DistroVersion.OS_X_MOJAVE

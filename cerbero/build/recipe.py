@@ -57,15 +57,35 @@ def log_step_output(recipe, stepfunc):
             os.remove(recipe.logfile.name)
         recipe.logfile = recipe.old_logfile
 
+    def get_all_prev_steps_logfiles():
+        current_step = stepfunc.__name__
+        logfiles = []
+        for step in recipe._steps:
+            step = step[1]
+            if step == current_step:
+                break
+            path = "%s/%s-%s.log" % (recipe.config.logs, recipe.name, step)
+            try:
+                logfiles.append(open(path, 'r'))
+            except OSError:
+                continue
+        return logfiles
+
     def handle_exception():
-        # Dump contents of log file on error
+        '''
+        Dump contents of log files for current and previous steps on error
+        '''
+        logfiles = get_all_prev_steps_logfiles()
+        # log file of current step
         recipe.logfile.seek(0)
-        while True:
-            data = recipe.logfile.read()
+        logfiles.append(recipe.logfile)
+        # Print all
+        for logfile in logfiles:
+            data = logfile.read()
+            logfile.close()
+            m.action('Contents of {}:'.format(logfile.name))
             if data:
                 print(data)
-            else:
-                break
 
     def wrapped():
         open_file()
@@ -238,8 +258,8 @@ SOFTWARE LICENSE COMPLIANCE.\n\n'''
             self.repo_dir = os.path.join(self.config.local_sources,
                     self.package_name)
         self.repo_dir = os.path.abspath(self.repo_dir)
-        self.build_dir = os.path.join(self.config.sources, self.package_name)
-        self.build_dir = os.path.abspath(self.build_dir)
+        self.build_dir = os.path.abspath(os.path.join(self.config.sources, self.package_name))
+        self.config_src_dir = self.build_dir
         self.deps = self.deps or []
         if self.config.prefix_is_build_tools():
             if self.btype == build.BuildType.MESON:
@@ -375,8 +395,8 @@ SOFTWARE LICENSE COMPLIANCE.\n\n'''
             'gstadaptivedemux-1.0' : None,
             'gstbadaudio-1.0' : 'gstreamer-bad-audio-1.0',
             'gstbasecamerabinsrc-1.0' : None,
+            'gstcodecs-1.0' : None,
             'gstisoff-1.0' : None,
-            'gstphotography-1.0' : None,
             'gsturidownloader-1.0' : None,
             'gstrtspserver-1.0' : 'gstreamer-rtsp-server-1.0',
             'gstvalidate-1.0' : 'gst-validate-1.0',
@@ -502,7 +522,8 @@ SOFTWARE LICENSE COMPLIANCE.\n\n'''
                 raise RuntimeError('{}.recipe: license file collision: {!r}'
                                    .format(self.name, LICENSE_INFO_FILENAME))
             dest = str(install_dir / fname)
-            src = os.path.join(self.build_dir, f)
+
+            src = os.path.join(self.config_src_dir, f)
             if shell.DRY_RUN:
                 print('Copying {!r} to {!r}'.format(src, dest))
             else:

@@ -121,17 +121,42 @@ iOS Universal          | `cross-ios-universal.cbc`
 iOS ARM64              | `cross-ios-arm64.cbc`
 iOS ARMv7              | `cross-ios-armv7.cbc`
 iOS x86                | `cross-ios-x86.cbc`
-iOS x86_64              | `cross-ios-x86-64.cbc`
+iOS x86_64             | `cross-ios-x86-64.cbc`
 
 #### Windows Targets
 
-Target                     | Config file
-:--------------------------|:-----------
-MinGW 32-bit System Prefix | `win32.cbc`
-MinGW 64-bit System Prefix | `win64.cbc`
+On Windows, config files are used to select the architecture and variants are
+used to select the toolchain (MinGW, MSVC, UWP):
 
-Currently no cross targets are supported on Windows.
+Target          | Config file               | Variant
+:---------------|:--------------------------|:-------
+MinGW x86       | `win32.cbc`               |
+MinGW x86_64    | `win64.cbc`               |
+MSVC x86        | `win32.cbc`               | visualstudio
+MSVC x86_64     | `win64.cbc`               | visualstudio
+UWP x86         | `win32.cbc`               | uwp
+UWP x86_64      | `win64.cbc`               | uwp
+UWP ARM64       | `cross-win-arm64.cbc`     | uwp
+UWP Universal   | `cross-uwp-universal.cbc  | (implicitly uwp)
 
+Example usage:
+
+```sh
+# Target MinGW 32-bit
+$ ./cerbero-uninstalled -c config/win32.cbc package gstreamer-1.0
+
+# Target MSVC 64-bit
+$ ./cerbero-uninstalled -c config/win64.cbc -v visualstudio package gstreamer-1.0
+
+# Target UWP, x86_64
+$ ./cerbero-uninstalled -c config/win64.cbc -v uwp package gstreamer-1.0
+
+# Target UWP, Cross ARM64
+$ ./cerbero-uninstalled -c config/cross-win-arm64.cbc -v uwp package gstreamer-1.0
+
+# Target UWP, All Supported Arches
+$ ./cerbero-uninstalled -c config/cross-uwp-universal.cbc package gstreamer-1.0
+```
 
 # Enabling Optional Features with Variants
 
@@ -148,7 +173,7 @@ a particular variant by doing one of the following:
 * Either invoke `cerbero-uninstalled` with the `-v` argument, for example:
 
 ```sh
-$ cerbero-uninstalled -v variantname [-c ...] package gstreamer-1.0
+$ ./cerbero-uninstalled -v variantname [-c ...] package gstreamer-1.0
 ```
 
 * Or, edit `~/.cerbero/cerbero.cbc` and add `variants = ['variantname']` at the
@@ -158,8 +183,8 @@ Multiple variants can either be separated by a comma or with multiple `-v`
 arguments, for example the following are equivalent:
 
 ```sh
-$ cerbero-uninstalled -v variantname1,variantname2 [-c ...] package gstreamer-1.0
-$ cerbero-uninstalled -v variantname1 -v variantname2 [-c ...] package gstreamer-1.0
+$ ./cerbero-uninstalled -v variantname1,variantname2 [-c ...] package gstreamer-1.0
+$ ./cerbero-uninstalled -v variantname1 -v variantname2 [-c ...] package gstreamer-1.0
 ```
 
 To explicitly disable a variant, use `novariantname` instead.
@@ -223,12 +248,9 @@ options enabled if possible.
 
 ### Nvidia Hardware Codecs
 
-For Nvidia, the [variant to enable](#enabling-optional-features-with-variants)
-is `nvcodec` which will build the `nvcodec` plugin.
-
-If CUDA is not installed into the system prefix, You need to set `CUDA_PATH` to
-point to your [CUDA SDK](https://developer.nvidia.com/cuda-downloads) prefix.
-On Windows, this is done automatically by the installer.
+Since 1.17.1, the `nvcodec` plugin does not need access to the Nvidia Video SDK
+or the CUDA SDK. It now loads everything at runtime. Hence, it is now enabled
+by default on all platforms.
 
 ## Enabling Visual Studio Support
 
@@ -255,6 +277,8 @@ Studio.
 
 # Installing Minimum Requirements on Windows
 
+**IMPORTANT:** Using cerbero on Windows with the [GCC/MinGW toolchain](docs/toolchains.md#Windows) requires a 64-bit operating system. The toolchain is only available for 64-bit and it can produce 32-bit or 64-bit binaries.
+
 These steps are necessary for using Cerbero on Windows.
 
 #### Install Python 3.5 or newer (either 32-bit or 64-bit)
@@ -270,6 +294,11 @@ Download the [Windows executable installer](https://www.python.org/downloads/) a
 * Third page, you must select the following options:
 
 ![Enable Install for all users, associate files with Python, add Python to environment variables, and customize the install location to not have any spaces in it](/data/images/py-installer-page3.png)
+
+* Enabled or Install [.NET 3.5.1 Framework](https://docs.microsoft.com/en-us/dotnet/framework/install/dotnet-35-windows-10)
+
+* On Windows 10, remove the Windows Store path entry from the PATH variable in the system settings. Otherwise, Cerbero will try to use the dummy Windows Store version of Python
+
 
 #### Install Git for Windows
 
@@ -318,7 +347,7 @@ installed at `C:\MinGW`.
 Cerbero from inside that**.
 
 **NOTE**: Cerbero does not use the MinGW compiler toolchain shipped with MSYS.
-We download our own custom GCC toolchain during [bootstrap](#Bootstrap).
+We download our own custom [GCC toolchain](docs/toolchains.md#gcc-mingw) during [bootstrap](#Bootstrap).
 
 **NOTE**: MSYS is not the same as [MSYS2](https://www.msys2.org/), and the
 GStreamer project does not support running Cerbero inside the MSYS2
@@ -332,7 +361,13 @@ MinGW. Both the Community build and the Professional build are supported.
 You must install the latest Windows 10 SDK when installing Visual Studio as
 shown below. You do not need any older Windows SDKs.
 
-![Select the Desktop development with C++ workload](/data/images/vs2017-installer-workloads.png)
+![Select the 'Desktop development with C++' workload](/data/images/vs2017-installer-workloads.png)
+
+If you want to build for UWP (aka Universal Windows Platform), you have to use
+VS 2017 or newer, and you must *also* select the Universal Windows Platform
+workload:
+
+![Select both 'Desktop development with C++' and 'Universal Windows Platform development' workloads](/data/images/vs-installer-uwp-workload.png)
 
 You can find all versions of Visual Studio at:
 https://visualstudio.microsoft.com/vs/older-downloads/

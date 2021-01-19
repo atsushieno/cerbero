@@ -3,7 +3,7 @@
 class Recipe(custom.GStreamer):
     name = 'gst-plugins-good-1.0'
     btype = BuildType.MESON
-    tarball_checksum = '654adef33380d604112f702c2927574cfc285e31307b79e584113858838bb0fd'
+    tarball_checksum = '6329bc377a3afea5cf1ab329a91cc4a906f075781780d1edc59e8bea8c1a8bac'
     meson_options = {# enabled plugins
                      'cairo': 'enabled',
                      'dv': 'enabled',
@@ -233,7 +233,7 @@ class Recipe(custom.GStreamer):
             self.meson_options['osxaudio'] = 'enabled'
 
         self.enable_plugin('video4linux2', 'capture', 'v4l2', option='v4l2')
-        self.enable_plugin('ximagesrc', 'capture', 'x11', option='x11')
+        self.enable_plugin('ximagesrc', 'capture', 'x11')
         self.enable_plugin('pulseaudio', 'sys', 'pulse', option='pulse')
 
         # Enable qt5 plugin if possible and selected
@@ -249,6 +249,10 @@ class Recipe(custom.GStreamer):
         if can_enable_qt5:
             self.enable_plugin('qmlgl', 'qt5', 'qt5', option='qt5')
 
+        # Recipes that need autoreconf hang on the Windows CI
+        if self.config.platform == Platform.WINDOWS:
+            self.disable_plugin('wavpack', 'codecs', dep='wavpack')
+
         if self.using_msvc():
             # plugin is C++, library is Autotools
             self.disable_plugin('taglib', 'codecs', dep='taglib')
@@ -258,7 +262,6 @@ class Recipe(custom.GStreamer):
             self.disable_plugin('directsound', 'sys')
             # External deps that haven't been ported to UWP
             self.disable_plugin('cairo', 'effects', dep='cairo')
-            self.disable_plugin('dv', 'codecs', dep='libdv')
             self.disable_plugin('flac', 'codecs', dep='flac')
             self.disable_plugin('gdkpixbuf', 'effects', option='gdk-pixbuf', dep='gdk-pixbuf')
             self.disable_plugin('jpeg', 'codecs', dep='libjpeg-turbo')
@@ -267,7 +270,6 @@ class Recipe(custom.GStreamer):
             self.disable_plugin('png', 'codecs', dep='libpng')
             self.disable_plugin('soup', 'net', dep='libsoup')
             self.disable_plugin('speex', 'codecs', dep='speex')
-            self.disable_plugin('wavpack', 'codecs', dep='wavpack')
 
         if self.config.variants.nodebug:
             self.append_env('CFLAGS', '-DGST_LEVEL_MAX=GST_LEVEL_FIXME')

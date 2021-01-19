@@ -4,7 +4,7 @@
 class Recipe(custom.GStreamer):
     name = 'gst-plugins-ugly-1.0'
     btype = BuildType.MESON
-    tarball_checksum = 'e30964c5f031c32289e0b25e176c3c95a5737f2052dfc81d0f7427ef0233a4c2'
+    tarball_checksum = '686644e45e08258ae240c4519376668ad8d34ea6d0f6ab556473c317bfb7e082'
     meson_options = {'a52dec': 'enabled',
                      'amrnb': 'enabled',
                      'amrwbdec': 'enabled',
@@ -48,11 +48,15 @@ class Recipe(custom.GStreamer):
     files_lang = ['gst-plugins-ugly-1.0']
 
     def prepare(self):
-        if self.using_msvc() or self.config.target_platform in (Platform.ANDROID, Platform.IOS):
+        if self.config.target_platform in (Platform.ANDROID, Platform.IOS):
             self.disable_plugin('dvdread', 'dvd', dep='libdvdread')
 
-        if self.using_msvc():
+        # Recipes that need autoreconf hang on the Windows CI
+        if self.config.platform == Platform.WINDOWS:
+            self.disable_plugin('dvdread', 'dvd', dep='libdvdread')
             self.disable_plugin('a52dec', 'codecs_restricted', dep='a52dec')
+
+        if self.using_uwp():
             self.disable_plugin('amrnb', 'codecs_restricted', dep='opencore-amr')
             self.disable_plugin('amrwbdec', 'codecs_restricted', dep='opencore-amr')
             self.disable_plugin('x264', 'codecs_restricted', dep='x264')

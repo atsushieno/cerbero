@@ -4,6 +4,7 @@ import shutil
 from setuptools import setup, find_packages
 from setuptools.command import sdist as setuptools_sdist
 from cerbero.utils import shell
+from cerbero.enums import CERBERO_VERSION
 from distutils.dir_util import copy_tree
 import distutils.log
 
@@ -18,10 +19,10 @@ def read(fname):
 # Utility function to parse directories
 def parse_dir(dirpath, extension=None):
     if os.path.exists('.git'):
-        files = shell.check_call('git ls-files %s' % dirpath).split('\n')
+        files = shell.check_output(['git', 'ls-files', dirpath]).split('\n')
         files.remove('')
     else:
-        files = shell.check_call('find %s -type f' % dirpath).split('\n')
+        files = shell.check_output(['find', dirpath, '-type', 'f']).split('\n')
         files.remove('')
     if extension is None:
         return files
@@ -127,7 +128,7 @@ class extended_sdist(setuptools_sdist.sdist):
 
 setup(
     name = "cerbero",
-    version = '1.17.0.1',
+    version = CERBERO_VERSION,
     author = "Andoni Morales",
     author_email = "amorales@fluendo.com",
     description = ("Multi platform build system for Open Source projects"),

@@ -73,7 +73,7 @@ class Variants(object):
     # Variants that are booleans, and are unset when prefixed with 'no'
     __disabled_variants = ['x11', 'alsa', 'pulse', 'cdparanoia', 'v4l2',
                            'gi', 'unwind', 'rpi', 'visualstudio', 'uwp', 'qt5',
-                           'intelmsdk', 'nvcodec', 'python', 'werror', 'vaapi']
+                           'intelmsdk', 'python', 'werror', 'vaapi']
     __enabled_variants = ['debug', 'optimization', 'testspackage']
     __bool_variants = __enabled_variants + __disabled_variants
     # Variants that are `key: (values)`, with the first value in the tuple
@@ -111,10 +111,7 @@ class Variants(object):
                 if v not in self.__bool_variants:
                     m.warning('Variant {!r} is unknown or obsolete'.format(v))
                 setattr(self, v, True)
-        # UWP implies Visual Studio
-        if self.uwp:
-            self.visualstudio = True
-        # Set auto mapping values based on other values
+        # Auto-set vscrt variant if it wasn't set explicitly
         if self.vscrt == 'auto':
             self.vscrt = 'md'
             if self.debug and not self.optimization:
@@ -124,6 +121,9 @@ class Variants(object):
             if '-' in attr:
                 raise AssertionError('Variant name {!r} must not contain \'-\''.format(attr))
             super().__setattr__(attr, value)
+            # UWP implies Visual Studio
+            if attr == 'uwp' and value:
+                self.visualstudio = True
 
     def __getattr__(self, name):
         if name.startswith('no') and name[2:] in self.bools():
@@ -249,6 +249,7 @@ class Config (object):
         self._load_platform_config()
         # And validate properties
         self._validate_properties()
+        self._check_windows_is_x86_64()
 
         for config in list(self.arch_config.values()):
             if self.target_arch == Architecture.UNIVERSAL:
@@ -284,16 +285,23 @@ class Config (object):
             if self.vs_install_path:
                 m.message('Using Visual Studio installed at {!r}'.format(self.vs_install_path))
 
+        m.message('Install prefix will be {}'.format(self.prefix))
         # Store current os.environ data
+        arches = []
+        if isinstance(self.universal_archs, dict):
+            arches = self.arch_config.keys()
         for c in list(self.arch_config.values()):
             self._create_path(c.local_sources)
             self._create_path(c.sources)
             self._create_path(c.logs)
-        m.message('Install prefix will be {}'.format(self.prefix))
+        if arches:
+            m.message('Building the following arches: ' + ' '.join(arches))
 
     def do_setup_env(self):
         self._create_path(self.prefix)
-        self._create_path(os.path.join(self.prefix, 'share', 'aclocal'))
+        # dict universal arches do not have an active prefix
+        if not isinstance(self.universal_archs, dict):
+            self._create_path(os.path.join(self.prefix, 'share', 'aclocal'))
         self._create_path(os.path.join(
             self.build_tools_prefix, 'share', 'aclocal'))
         self._create_path(os.path.join(
@@ -338,11 +346,7 @@ class Config (object):
             old_v = old_env[k]
             if new_v == old_v:
                 ret_env[k] = new_v
-            elif EnvVar.is_path(k):
-                ret_env[k] = self._join_path(new_v, old_v)
-            elif EnvVar.is_arg(k):
-                ret_env[k] = self._join_values(new_v, old_v)
-            elif EnvVar.is_cmd(k):
+            elif EnvVar.is_path(k) or EnvVar.is_arg(k) or EnvVar.is_cmd(k):
                 ret_env[k] = new_v
             else:
                 raise FatalError("Don't know how to combine the environment "
@@ -386,22 +390,26 @@ class Config (object):
         gstregistry = os.path.expanduser(gstregistry)
         gstregistry10 = os.path.expanduser(gstregistry10)
 
-        pypath = sysconfig.get_path('purelib', vars={'base': ''})
-        # Must strip \/ to ensure that the path is relative
-        pypath = PurePath(pypath.strip('\\/'))
-        # Starting with Python 3.7.1 on Windows, each PYTHONPATH must use the
-        # native path separator and must end in a path separator.
-        pythonpath = [str(prefix / pypath) + os.sep,
-                      str(self.build_tools_prefix / pypath) + os.sep]
-
-        if self.platform == Platform.WINDOWS:
-            # On Windows, pypath doesn't include Python version although some
-            # packages (pycairo, gi, etc...) install themselves using Python
-            # version scheme like on a posix system.
-            # Let's add an extra path to PYTHONPATH for these libraries.
-            pypath = sysconfig.get_path('purelib', 'posix_prefix', {'base': ''})
+        for p in (prefix, self.build_tools_prefix):
+            # Explicitly use the posix_prefix scheme because:
+            # 1. On Windows, pypath doesn't include Python version although some
+            #    packages (pycairo, gi, etc...) install themselves using Python
+            #    version scheme like on a posix system.
+            # 2. The Python3 that ships with XCode on macOS Big Sur defaults to
+            #    a framework path, but setuptools defaults to a posix prefix
+            # So just use a posix prefix everywhere consistently.
+            pypath = sysconfig.get_path('purelib', 'posix_prefix', vars={'base': ''})
+            # Must strip \/ to ensure that the path is relative
             pypath = PurePath(pypath.strip('\\/'))
-            pythonpath.append(str(prefix / pypath) + os.sep)
+            # Starting with Python 3.7.1 on Windows, each PYTHONPATH must use the
+            # native path separator and must end in a path separator.
+            pythonpath = [str(p / pypath) + os.sep]
+            # Make sure we also include the default non-versioned path on
+            # Windows in addition to the posix path.
+            if self.platform == Platform.WINDOWS:
+                pypath = sysconfig.get_path('purelib', vars={'base': ''})
+                pypath = PurePath(pypath.strip('\\/'))
+                pythonpath += [str(p / pypath) + os.sep]
 
         # Ensure python paths exists because setup.py won't create them
         for path in pythonpath:
@@ -410,7 +418,9 @@ class Config (object):
                 # undesirable since our libdir is 'lib'. Windows APIs are
                 # case-preserving case-insensitive.
                 path = path.lower()
-            self._create_path(path)
+            # dict universal arches do not have an active prefix
+            if not isinstance(self.universal_archs, dict):
+                self._create_path(path)
         pythonpath = os.pathsep.join(pythonpath)
 
         if self.platform == Platform.LINUX:
@@ -509,7 +519,7 @@ class Config (object):
         self.set_property('target_distro_version', distro_version)
         self.set_property('packages_prefix', None)
         self.set_property('packager', DEFAULT_PACKAGER)
-        self.set_property('package_tarball_compression', 'bz2')
+        self.set_property('package_tarball_compression', 'xz')
         stdlibpath = sysconfig.get_path('stdlib', vars={'installed_base': ''})[1:]
         # Ensure that the path uses / as path separator and not \
         self.set_property('py_prefix', PurePath(stdlibpath).as_posix())
@@ -639,6 +649,11 @@ class Config (object):
             raise FatalError(_('packager "%s" must be in the format '
                                '"Name <email>"') % self.packager)
 
+    def _check_windows_is_x86_64(self):
+         if self.target_platform == Platform.WINDOWS and \
+                self.arch == Architecture.X86:
+            raise ConfigurationError('The GCC/MinGW toolchain requires an x86 64-bit OS.')
+
     def _check_uninstalled(self):
         self.uninstalled = int(os.environ.get(CERBERO_UNINSTALLED, 0)) == 1
 
@@ -689,6 +704,25 @@ class Config (object):
             if os.path.exists(config_path):
                 self._parse(config_path, reset=False)
 
+    def _get_toolchain_target_platform_arch(self):
+        platform_arch = '{}_' + self.target_arch
+        if self.target_platform != Platform.WINDOWS or self.prefix_is_build_tools():
+            return (self.target_platform, self.target_arch)
+        if not self.variants.visualstudio:
+            return ('mingw', self.target_arch)
+        # When building with Visual Studio, we can target (MSVC, UWP) x (debug, release)
+        if self.variants.uwp:
+            target_platform = 'uwp'
+        else:
+            target_platform = 'msvc'
+        # Debug CRT needs a separate prefix
+        if self.variants.vscrt == 'mdd':
+            target_platform += '-debug'
+        # Check for invalid configuration of a custom Visual Studio path
+        if self.vs_install_path and not self.vs_install_version:
+            raise ConfigurationError('vs_install_path was set, but vs_install_version was not')
+        return (target_platform, self.target_arch)
+
     def _load_last_defaults(self):
         # Set build tools defaults
         self.set_property('build_tools_prefix',
@@ -699,33 +733,11 @@ class Config (object):
                 os.path.join(self.home_dir, 'logs', 'build-tools'))
         self.set_property('build_tools_cache', 'build-tools.cache')
         # Set target platform defaults
-        target_platform = self.target_platform
-        if target_platform == Platform.WINDOWS and not self.prefix_is_build_tools():
-            if self.variants.visualstudio:
-                if self.variants.uwp:
-                    target_platform = 'uwp'
-                else:
-                    target_platform = 'msvc'
-                # Debug CRT needs a separate prefix
-                if self.variants.vscrt == 'mdd':
-                    target_platform += '-debug'
-                # Check for invalid configuration of a custom Visual Studio path
-                if self.vs_install_path and not self.vs_install_version:
-                    raise ConfigurationError('vs_install_path was set, but vs_install_version was not')
-            else:
-                target_platform = 'mingw'
-            # If the cmd config set the prefix, append the variant modifier to
-            # it so that we don't clobber different toolchain builds
-            if self.prefix is not None:
-                self.prefix += '.' + target_platform
-        self.set_property('prefix', os.path.join(self.home_dir, "dist",
-            "%s_%s" % (target_platform, self.target_arch)))
-        self.set_property('sources', os.path.join(self.home_dir, "sources",
-            "%s_%s" % (target_platform, self.target_arch)))
-        self.set_property('logs', os.path.join(self.home_dir, "logs",
-            "%s_%s" % (target_platform, self.target_arch)))
-        self.set_property('cache_file',
-                "%s_%s.cache" % (target_platform, self.target_arch))
+        platform_arch = '_'.join(self._get_toolchain_target_platform_arch())
+        self.set_property('prefix', os.path.join(self.home_dir, "dist", platform_arch))
+        self.set_property('sources', os.path.join(self.home_dir, "sources", platform_arch))
+        self.set_property('logs', os.path.join(self.home_dir, "logs", platform_arch))
+        self.set_property('cache_file', platform_arch + ".cache")
         self.set_property('install_dir', self.prefix)
         self.set_property('local_sources', self._default_local_sources_dir())
 

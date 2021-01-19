@@ -48,6 +48,12 @@ class Recipe(recipe.Recipe):
         'glib/0003-meson-Only-look-for-_NSGetEnviron-when-building-for-.patch',
         # https://gitlab.gnome.org/GNOME/glib/-/merge_requests/1522
         'glib/0001-meson-Fix-gnulib-printf-checks.patch',
+        # https://gitlab.gnome.org/GNOME/glib/-/merge_requests/1579
+        'glib/0001-glib-Use-g_getenv-everywhere-instead-of-getenv.patch',
+        # https://gitlab.gnome.org/GNOME/glib/-/merge_requests/1771
+        'glib/0001-macos-fix-frexpl-checks-in-cross-compilation.patch',
+        # https://gitlab.gnome.org/GNOME/glib/-/merge_requests/1884
+        'glib/0001-gthread-win32-Use-SetThreadDescription-Win32-API-for.patch',
     ]
 
     files_libs = [
@@ -122,8 +128,8 @@ class Recipe(recipe.Recipe):
             self.deps.append('proxy-libintl')
 
         # Android only provides libiconv with API level >=28 (Pie and newer)
-        #if self.config.target_platform == Platform.ANDROID:
-        #    self.deps.append('libiconv')
+        if self.config.target_platform == Platform.ANDROID and DistroVersion.get_android_api_version(self.config.target_distro_version) < 28:
+            self.deps.append('libiconv')
 
         if self.config.target_platform == Platform.WINDOWS:
             # Want secure versions of stdlib functions. Glib already defines
@@ -135,8 +141,12 @@ class Recipe(recipe.Recipe):
                 self.files_bins.remove('gdbus')
                 self.files_bins_devel.remove('bin/gdbus.pdb')
                 self.patches += [
-                    # Ready to upstream
+                    # https://gitlab.gnome.org/GNOME/glib/-/merge_requests/1583
                     'glib/uwp/0001-gio-Remove-broken-support-for-XP.patch',
+                    # Ready to upstream
+                    'glib/uwp/0001-gio-Disable-generic-DNS-record-lookup-on-UWP.patch',
+                    'glib/uwp/0001-glib-Never-use-MessageBox-on-UWP-apps.patch',
+                    'glib/uwp/0001-gpoll-UWP-does-not-need-to-poll-a-msg_fd.patch',
                     'glib/uwp/0002-win_iconv-Use-LoadPackagedLibrary-when-building-UWP-.patch',
                     'glib/uwp/0003-glib-getpid-is-available-on-Win32-but-not-WinRT.patch',
                     'glib/uwp/0004-goption-Do-not-call-GetCommandlineW-on-UWP.patch',

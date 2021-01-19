@@ -24,24 +24,24 @@ from cerbero.utils import messages as m
 from cerbero.bootstrap.build_tools import BuildTools
 
 
-bootstrappers = {}
+toolchain_bootstrappers = {}
+system_bootstrappers = {}
 
 
-def register_bootstrapper(distro, klass, distro_version=None):
-    if not distro in bootstrappers:
-        bootstrappers[distro] = {}
-    bootstrappers[distro][distro_version] = klass
+def register_system_bootstrapper(distro, klass, distro_version=None):
+    if not distro in system_bootstrappers:
+        system_bootstrappers[distro] = {}
+    system_bootstrappers[distro][distro_version] = klass
+
+def register_toolchain_bootstrapper(distro, klass, distro_version=None):
+    if not distro in toolchain_bootstrappers:
+        toolchain_bootstrappers[distro] = {}
+    toolchain_bootstrappers[distro][distro_version] = klass
 
 
 class Bootstrapper (object):
-    def __new__(klass, config, build_tools_only, offline, assume_yes,
-            system_only):
+    def __new__(klass, config, system, toolchains, build_tools, offline, assume_yes):
         bs = []
-
-        if not system_only:
-            bs.append(BuildTools(config, offline))
-        if build_tools_only:
-            return bs
 
         target_distro = config.target_distro
         distro = config.distro
@@ -55,20 +55,31 @@ class Bootstrapper (object):
         target = (target_distro, target_distro_version)
         build = (distro, distro_version)
 
-        if target == build:
-            blist = [target]
-        else:
-            blist = [target, build]
-
-        for d, v in blist:
-            if d not in bootstrappers:
-                raise FatalError(_("No bootstrapper for the distro %s" % d))
-            if v not in bootstrappers[d]:
-                # Be tolerant with the distro version
-                m.warning(_("No bootstrapper for the distro version %s" % v))
+        # Always run the system bootstrapper first (if enabled)
+        if system:
+            d, v = build
+            if d not in system_bootstrappers:
+                raise FatalError(_("No system bootstrapper for %s" % d))
+            if v not in system_bootstrappers[d]:
                 v = None
+            bs.append(system_bootstrappers[d][v](config, offline, assume_yes))
 
-            bs.insert(0, bootstrappers[d][v](config, offline, assume_yes))
+        # We need to run the toolchain bootstrapper for the target, not the
+        # build because we might be cross-compiling
+        if toolchains:
+            d, v = target
+            # We don't require a toolchain bootstrapper when not
+            # cross-compiling, and when cross-compiling we sometimes rely on
+            # the system to provide it. For example, when cross-compiling to
+            # Linux-ARM or to UWP.
+            if d in toolchain_bootstrappers:
+                if v not in toolchain_bootstrappers[d]:
+                    v = None
+                bs.append(toolchain_bootstrappers[d][v](config, offline, assume_yes))
+
+        # Build the build-tools after all other bootstrappers
+        if build_tools:
+            bs.append(BuildTools(config, offline))
 
         return bs
 

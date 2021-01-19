@@ -4,7 +4,8 @@ from cerbero.tools.libtool import LibtoolLibrary
 class Recipe(custom.GStreamer):
     name = 'gst-plugins-bad-1.0'
     btype = BuildType.MESON
-    tarball_checksum = '22139de35626ada6090bdfa3423b27b7fc15a0198331d25c95e6b12cb1072b05'
+    licenses = [{License.LGPLv2Plus: None, License.BSD_like: ['ext/sctp/usrsctp/LICENSE.md']}]
+    tarball_checksum = 'f382ab1caddd64aaa7acb7c4787487f63fd39bd0fde9c757655cbaa457c1185f'
     # Explicitly enable plugins that we provide dependencies for to ensure that
     # we error out if they weren't found.
     meson_options = {# enabled plugins
@@ -20,6 +21,7 @@ class Recipe(custom.GStreamer):
                      'kate': 'enabled',
                      'ladspa': 'auto', # lrdf is optional
                      'libmms': 'enabled',
+                     'nvcodec': 'enabled',
                      'openh264': 'enabled',
                      'openjpeg': 'enabled',
                      'opus': 'enabled',
@@ -27,11 +29,13 @@ class Recipe(custom.GStreamer):
                      'rtmp2': 'enabled',
                      'sbc': 'enabled',
                      'sctp': 'enabled',
+                     'sctp-internal-usrsctp': 'enabled',
                      'soundtouch': 'enabled',
                      'srt': 'enabled',
                      'spandsp': 'enabled',
                      'srtp': 'enabled',
                      'resindvd': 'enabled',
+                     'rist' : 'enabled',
                      'rsvg': 'enabled',
                      'voaacenc': 'enabled',
                      'vulkan': 'enabled',
@@ -70,48 +74,54 @@ class Recipe(custom.GStreamer):
             'libsrtp', 'libdca', 'libmms', 'libdvdnav', 'libnice',
             'soundtouch', 'vo-aacenc', 'librsvg', 'openjpeg',
             'pango', 'spandsp', 'webrtc-audio-processing', 'sbc', 'ladspa',
-            'srt', 'libusrsctp', 'zbar']
+            'srt', 'zbar']
     use_system_libs = True
 
     files_lang = ['gst-plugins-bad-1.0']
 
-    files_libs = ['libgstcodecparsers-1.0',
-                  'libgstcodecs-1.0',
-                  'libgstmpegts-1.0',
-                  'libgsturidownloader-1.0',
-                  'libgstbasecamerabinsrc-1.0',
-                  'libgstphotography-1.0',
-                  'libgstinsertbin-1.0',
-                  'libgstadaptivedemux-1.0',
-                  'libgstplayer-1.0',
-                  'libgstbadaudio-1.0',
-                  'libgstisoff-1.0',
-                  'libgstsctp-1.0',
-                  'libgstwebrtc-1.0',
-                  'libgstvulkan-1.0']
+    files_libs = [
+        'libgstadaptivedemux-1.0',
+        'libgstbadaudio-1.0',
+        'libgstbasecamerabinsrc-1.0',
+        'libgstcodecparsers-1.0',
+        'libgstcodecs-1.0',
+        'libgstinsertbin-1.0',
+        'libgstisoff-1.0',
+        'libgstmpegts-1.0',
+        'libgstphotography-1.0',
+        'libgstplayer-1.0',
+        'libgstsctp-1.0',
+        'libgsttranscoder-1.0',
+        'libgsturidownloader-1.0',
+        'libgstvulkan-1.0',
+        'libgstwebrtc-1.0',
+    ]
 
     files_plugins_devel = [
-        'include/gstreamer-1.0/gst/mpegts',
-        'include/gstreamer-1.0/gst/player',
-        'include/gstreamer-1.0/gst/base',
         'include/gstreamer-1.0/gst/audio',
+        'include/gstreamer-1.0/gst/base',
         'include/gstreamer-1.0/gst/basecamerabinsrc',
         'include/gstreamer-1.0/gst/codecparsers',
         'include/gstreamer-1.0/gst/insertbin',
         'include/gstreamer-1.0/gst/interfaces',
         'include/gstreamer-1.0/gst/isoff',
+        'include/gstreamer-1.0/gst/mpegts',
+        'include/gstreamer-1.0/gst/player',
         'include/gstreamer-1.0/gst/sctp',
-        'include/gstreamer-1.0/gst/webrtc',
+        'include/gstreamer-1.0/gst/transcoder',
         'include/gstreamer-1.0/gst/vulkan',
-        'lib/pkgconfig/gstreamer-plugins-bad-1.0.pc',
-        'lib/pkgconfig/gstreamer-mpegts-1.0.pc',
-        'lib/pkgconfig/gstreamer-player-1.0.pc',
+        'include/gstreamer-1.0/gst/webrtc',
         'lib/pkgconfig/gstreamer-bad-audio-1.0.pc',
         'lib/pkgconfig/gstreamer-codecparsers-1.0.pc',
         'lib/pkgconfig/gstreamer-insertbin-1.0.pc',
+        'lib/pkgconfig/gstreamer-mpegts-1.0.pc',
+        'lib/pkgconfig/gstreamer-photography-1.0.pc',
+        'lib/pkgconfig/gstreamer-player-1.0.pc',
+        'lib/pkgconfig/gstreamer-plugins-bad-1.0.pc',
         'lib/pkgconfig/gstreamer-sctp-1.0.pc',
-        'lib/pkgconfig/gstreamer-webrtc-1.0.pc',
+        'lib/pkgconfig/gstreamer-transcoder-1.0.pc',
         'lib/pkgconfig/gstreamer-vulkan-1.0.pc',
+        'lib/pkgconfig/gstreamer-webrtc-1.0.pc',
     ]
 
     files_plugins_effects = [
@@ -211,6 +221,7 @@ class Recipe(custom.GStreamer):
              'lib/gstreamer-1.0/libgstspandsp%(mext)s',
              'lib/gstreamer-1.0/libgstsbc%(mext)s',
              'lib/gstreamer-1.0/libgstzbar%(mext)s',
+             'lib/gstreamer-1.0/libgstnvcodec%(mext)s',
     ]
 
     files_plugins_codecs_devel = [
@@ -242,6 +253,7 @@ class Recipe(custom.GStreamer):
              'lib/gstreamer-1.0/libgstspandsp.a', 'lib/gstreamer-1.0/libgstspandsp.la',
              'lib/gstreamer-1.0/libgstsbc.a', 'lib/gstreamer-1.0/libgstsbc.la',
              'lib/gstreamer-1.0/libgstzbar.a', 'lib/gstreamer-1.0/libgstzbar.la',
+             'lib/gstreamer-1.0/libgstnvcodec.a', 'lib/gstreamer-1.0/libgstnvcodec.la',
     ]
 
     platform_files_plugins_codecs = {
@@ -295,7 +307,9 @@ class Recipe(custom.GStreamer):
     files_plugins_net = [
              'lib/gstreamer-1.0/libgstdtls%(mext)s',
              'lib/gstreamer-1.0/libgstnetsim%(mext)s',
+             'lib/gstreamer-1.0/libgstrist%(mext)s',
              'lib/gstreamer-1.0/libgstrtmp2%(mext)s',
+             'lib/gstreamer-1.0/libgstrtpmanagerbad%(mext)s',
              'lib/gstreamer-1.0/libgstsctp%(mext)s',
              'lib/gstreamer-1.0/libgstsdpelem%(mext)s',
              'lib/gstreamer-1.0/libgstsrtp%(mext)s',
@@ -306,7 +320,9 @@ class Recipe(custom.GStreamer):
     files_plugins_net_devel = [
              'lib/gstreamer-1.0/libgstdtls.a', 'lib/gstreamer-1.0/libgstdtls.la',
              'lib/gstreamer-1.0/libgstnetsim.a', 'lib/gstreamer-1.0/libgstnetsim.la',
+             'lib/gstreamer-1.0/libgstrist.a', 'lib/gstreamer-1.0/libgstrist.la',
              'lib/gstreamer-1.0/libgstrtmp2.a', 'lib/gstreamer-1.0/libgstrtmp2.la',
+             'lib/gstreamer-1.0/libgstrtpmanagerbad.a', 'lib/gstreamer-1.0/libgstrtpmanagerbad.la',
              'lib/gstreamer-1.0/libgstsctp.a', 'lib/gstreamer-1.0/libgstsctp.la',
              'lib/gstreamer-1.0/libgstsdpelem.a', 'lib/gstreamer-1.0/libgstsdpelem.la',
              'lib/gstreamer-1.0/libgstsrtp.a', 'lib/gstreamer-1.0/libgstsrtp.la',
@@ -431,8 +447,9 @@ class Recipe(custom.GStreamer):
     files_typelibs = [
         'GstInsertBin-1.0',
         'GstMpegts-1.0',
-        'GstPlayer-1.0'
-        ]
+        'GstPlayer-1.0',
+        'GstTranscoder-1.0',
+    ]
 
     platform_files_codecs_devel = {
         Platform.ANDROID: [
@@ -447,9 +464,10 @@ class Recipe(custom.GStreamer):
             self.append_env('CFLAGS', '-DGSTREAMER_GLIB_COCOA_NSAPPLICATION=1')
             self.append_env('OBJCFLAGS', '-DGSTREAMER_GLIB_COCOA_NSAPPLICATION=1')
 
-        # Enable hardware codecs if variants are enabled
-        self.enable_plugin('nvcodec', 'codecs', 'nvcodec')
+        # Enable hardware codecs if variants are enabled since they have
+        # external dependencies such as SDKs.
         self.enable_plugin('msdk', 'codecs', 'intelmsdk')
+        self.enable_plugin('va', 'codecs', 'vaapi')
 
         # MediaFoundation can only be built with MSVC
         self.enable_plugin('mediafoundation', 'sys', 'visualstudio')
@@ -477,7 +495,12 @@ class Recipe(custom.GStreamer):
 
         if self.config.target_platform in (Platform.DARWIN, Platform.IOS):
             self.meson_options['applemedia'] = 'enabled'
-            self.deps += ['moltenvk']
+            # No Vulkan SDK for macOS ARM664 yet
+            if self.config.target_platform == Platform.DARWIN and \
+                    self.config.target_arch ==  Architecture.ARM64:
+                self.disable_plugin('vulkan', 'vulkan', library_name='vulkan')
+            else:
+                self.deps += ['moltenvk']
         if self.config.target_platform in (Platform.ANDROID):
             self.deps += ['vulkan-android']
 
@@ -485,7 +508,12 @@ class Recipe(custom.GStreamer):
                 (self.config.target_platform == Platform.IOS and self.config.target_arch != Architecture.ARM64):
             self.disable_plugin('vulkan', 'vulkan', library_name='vulkan')
 
-        if self.using_msvc() or self.config.target_platform in (Platform.ANDROID, Platform.IOS):
+        if self.config.target_platform in (Platform.ANDROID, Platform.IOS):
+            self.disable_plugin('resindvd', 'dvd', dep='libdvdnav')
+            self.disable_plugin('nvcodec', 'codecs')
+
+        # Recipes that need autoreconf hang on the Windows CI
+        if self.config.platform == Platform.WINDOWS:
             self.disable_plugin('resindvd', 'dvd', dep='libdvdnav')
 
         # dtls plugin needs openssl, and we pick up the system openssl if on
@@ -511,7 +539,6 @@ class Recipe(custom.GStreamer):
             self.disable_plugin('ladspa', 'effects', dep='ladspa')
             self.disable_plugin('mms', 'net_restricted', option='libmms', dep='libmms')
             self.disable_plugin('openjpeg', 'codecs', dep='openjpeg')
-            self.disable_plugin('opusparse', 'codecs', option='opus', dep='opus')
             self.disable_plugin('rtmp', 'net_restricted', option='rtmp', dep='librtmp')
             self.disable_plugin('sbc', 'codecs', dep='sbc')
             self.disable_plugin('spandsp', 'codecs', dep='spandsp')
@@ -525,8 +552,6 @@ class Recipe(custom.GStreamer):
             self.append_env('CFLAGS', '-DGST_LEVEL_MAX=GST_LEVEL_FIXME')
 
     def post_install(self):
-        LibtoolLibrary('gstphotography-1.0', None, None, None, self.config.libdir,
-                self.config.target_platform, deps=['gstreamer-1.0']).save()
         LibtoolLibrary('gsturidownloader-1.0', None, None, None, self.config.libdir,
                 self.config.target_platform, deps=['gstreamer-1.0', 'gstbase-1.0']).save()
         LibtoolLibrary('gstadaptivedemux-1.0', None, None, None, self.config.libdir,

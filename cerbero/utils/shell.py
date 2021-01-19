@@ -35,12 +35,13 @@ import collections
 from pathlib import Path, PurePath
 from distutils.version import StrictVersion
 
-from cerbero.enums import Platform
+from cerbero.enums import CERBERO_VERSION, Platform
 from cerbero.utils import _, system_info, to_unixpath, determine_num_of_cpus, CerberoSemaphore
 from cerbero.utils import messages as m
 from cerbero.errors import CommandError, FatalError
 
 
+USER_AGENT = 'GStreamer Cerbero/' + CERBERO_VERSION
 PATCH = 'patch'
 TAR = 'tar'
 TARBALL_SUFFIXES = ('tar.gz', 'tgz', 'tar.bz2', 'tbz2', 'tar.xz')
@@ -145,6 +146,7 @@ def call(cmd, cmd_dir='.', fail=True, verbose=False, logfile=None, env=None):
             env['PYTHONUNBUFFERED'] = '1'
             ret = subprocess.check_call(cmd, cwd=cmd_dir, bufsize=1,
                                        stderr=subprocess.STDOUT, stdout=stream,
+                                       stdin=subprocess.DEVNULL,
                                        universal_newlines=True,
                                        env=env, shell=shell)
     except SUBPROCESS_EXCEPTIONS as e:
@@ -179,14 +181,17 @@ def check_output(cmd, cmd_dir=None, fail=True, logfile=None, env=None, quiet=Fal
     return o
 
 
-def new_call(cmd, cmd_dir=None, fail=True, logfile=None, env=None):
+def new_call(cmd, cmd_dir=None, fail=True, logfile=None, env=None, verbose=False):
     cmd = _cmd_string_to_array(cmd, env)
     if logfile:
         logfile.write('Running command {!r}\n'.format(cmd))
         logfile.flush()
+    if verbose:
+        m.message('Running {!r}\n'.format(cmd))
     try:
         subprocess.check_call(cmd, cwd=cmd_dir, env=env,
-                              stdout=logfile, stderr=subprocess.STDOUT)
+                              stdout=logfile, stderr=subprocess.STDOUT,
+                              stdin=subprocess.DEVNULL)
     except SUBPROCESS_EXCEPTIONS as e:
         returncode = getattr(e, 'returncode', -1)
         if not fail:
@@ -236,7 +241,7 @@ async def async_call(cmd, cmd_dir='.', fail=True, logfile=None, cpu_bound=True, 
         env['PYTHONUNBUFFERED'] = '1'
         proc = await asyncio.create_subprocess_exec(*cmd, cwd=cmd_dir,
                             stderr=subprocess.STDOUT, stdout=stream,
-                            env=env)
+                            stdin=subprocess.DEVNULL, env=env)
         await proc.wait()
         if proc.returncode != 0 and fail:
             msg = ''
@@ -276,7 +281,8 @@ async def async_call_output(cmd, cmd_dir=None, logfile=None, cpu_bound=True, env
             tempfile.tempdir = str(PurePath(tempfile.gettempdir()))
 
         proc = await asyncio.create_subprocess_exec(*cmd, cwd=cmd_dir,
-                stdout=subprocess.PIPE, stderr=logfile, env=env)
+                stdout=subprocess.PIPE, stderr=logfile,
+                stdin=subprocess.DEVNULL, env=env)
         (output, unused_err) = await proc.communicate()
 
         if PLATFORM == Platform.WINDOWS:
@@ -331,6 +337,13 @@ async def unpack(filepath, output_dir, logfile=None):
     elif filepath.endswith('.zip'):
         zf = zipfile.ZipFile(filepath, "r")
         zf.extractall(path=output_dir)
+    elif filepath.endswith('.dmg'):
+        vol_name =  '/Volumes/' + os.path.splitext(os.path.split(filepath)[1])[0]
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        call(['hdiutil', 'attach', filepath])
+        call(['cp', '-r', vol_name, output_dir])
+        call(['hdiutil', 'detach', vol_name])
     else:
         raise FatalError("Unknown tarball format %s" % filepath)
 
@@ -343,7 +356,7 @@ async def download_wget(url, destination=None, check_cert=True, overwrite=False,
     @param destination: destination where the file will be saved
     @type destination: str
     '''
-    cmd = ['wget', url]
+    cmd = ['wget', '--user-agent', USER_AGENT, url]
     path = None
     if destination is not None:
         cmd += ['-O', destination]
@@ -381,7 +394,9 @@ async def download_urllib2(url, destination=None, check_cert=True, overwrite=Fal
 
     try:
         with open(destination, 'wb') as d:
-            f = urllib.request.urlopen(url, context=ctx)
+            req = urllib.request.Request(url)
+            req.add_header('User-Agent', USER_AGENT)
+            f = urllib.request.urlopen(req, context=ctx)
             d.write(f.read())
     except urllib.error.HTTPError as e:
         if os.path.exists(destination):
@@ -398,7 +413,7 @@ async def download_curl(url, destination=None, check_cert=True, overwrite=False,
     @type destination: str
     '''
     path = None
-    cmd = ['curl', '-L', '--fail', '--retry', '2']
+    cmd = ['curl', '-L', '--fail', '--retry', '2', '--user-agent', USER_AGENT]
     if not check_cert:
         cmd += ['-k']
     if destination is not None:
@@ -497,12 +512,10 @@ def ls_dir(dirpath, prefix):
     return files
 
 
-def find_newer_files(prefix, compfile, include_link=False):
-    include_links = include_link and '-L' or ''
-    cmd = 'find %s * -type f -cnewer %s' % (include_links, compfile)
-    sfiles = check_call(cmd, prefix, True, False, False).split('\n')
-    sfiles.remove('')
-    return sfiles
+def find_newer_files(prefix, compfile):
+    cmd = ['find', '.', '-type', 'f', '-cnewer', compfile]
+    out = check_call(cmd, cmd_dir=prefix, fail=False)
+    return out.strip().split('\n')
 
 
 def replace(filepath, replacements):

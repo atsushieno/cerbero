@@ -23,14 +23,16 @@ import shutil
 from hashlib import sha256
 
 from cerbero.commands import Command, register_command
+from cerbero.enums import Platform
 from cerbero.errors import FatalError
-from cerbero.utils import _, N_, ArgparseArgument, git, shell, run_until_complete
+from cerbero.utils import _, N_, ArgparseArgument, git, shell, run_until_complete, to_unixpath
 from cerbero.utils import messages as m
 from cerbero.config import Distro
 
 class BaseCache(Command):
     base_url = 'https://artifacts.gstreamer-foundation.net/cerbero-deps/%s/%s/%s'
     ssh_address = 'cerbero-deps-uploader@artifacts.gstreamer-foundation.net'
+    # FIXME: fetch this value from CI env vars
     build_dir = '/builds/%s/cerbero/cerbero-build'
     deps_filename = 'cerbero-deps.tar.xz'
     log_filename = 'cerbero-deps.log'
@@ -63,7 +65,7 @@ class BaseCache(Command):
         tmpdir = tempfile.mkdtemp()
         tmpfile = os.path.join(tmpdir, 'deps.json')
         run_until_complete(shell.download(url, destination=tmpfile,
-              logfile=open('/dev/null', 'w')))
+              logfile=open(os.devnull, 'w')))
 
         with open(tmpfile, 'r') as f:
             resp = f.read()
@@ -78,6 +80,13 @@ class BaseCache(Command):
             distro = 'fedora'
         if distro == Distro.OS_X:
             distro = 'macos'
+        if distro == Distro.WINDOWS:
+            # When targeting Windows, we need to differentiate between mingw,
+            # msvc, and uwp (debug/release) jobs. When cross-compiling this
+            # will always be 'cross-windows-mingw' right now, but that might
+            # change at some point.
+            toolchain, _ = config._get_toolchain_target_platform_arch()
+            distro = 'windows-' + toolchain
         if config.cross_compiling():
             distro = 'cross-' + distro
         return distro, arch
@@ -138,13 +147,19 @@ class FetchCache(BaseCache):
                 m.warning("Corrupted dependency file, ignoring.")
             os.remove(dep_path)
 
-            origin = self.build_dir % namespace
-            m.message("Relocating from %s to %s" % (origin, config.home_dir))
-            # FIXME: Just a quick hack for now
-            shell.call(("grep -lnrIU %(origin)s | xargs "
-                        "sed \"s#%(origin)s#%(dest)s#g\" -i") % {
-                            'origin': origin, 'dest': config.home_dir},
-                        config.home_dir)
+            # Don't need to relocate on Windows and macOS since we build
+            # pkg-config with --enable-define-prefix.
+            # In case this needs to be re-enabled at some point, note that the
+            # current self.build_dir value is hard-coded and is wrong on macOS
+            # and Windows. It should instead be derived from CI env vars.
+            if config.platform == Platform.LINUX:
+                origin = self.build_dir % namespace
+                m.message("Relocating from %s to %s" % (origin, config.home_dir))
+                # FIXME: Just a quick hack for now
+                shell.call(("grep -lnrIU %(origin)s | xargs "
+                            "sed \"s#%(origin)s#%(dest)s#g\" -i") % {
+                                'origin': origin, 'dest': config.home_dir},
+                            config.home_dir)
         except FatalError as e:
             m.warning("Could not retrieve dependencies for commit %s: %s" % (
                         dep['commit'], e.msg))
@@ -157,6 +172,7 @@ class FetchCache(BaseCache):
         dep = self.find_dep(deps, sha)
         if dep:
             run_until_complete(self.fetch_dep(config, dep, args.namespace))
+        m.message('All done!')
 
 class GenCache(BaseCache):
     doc = N_('Generate build cache from current state.')
@@ -196,6 +212,7 @@ class GenCache(BaseCache):
             os.remove(deps_filename)
             os.remove(log_filename)
             raise
+        m.message('build-dep cache generated as {}'.format(deps_filename))
 
     def run(self, config, args):
         BaseCache.run(self, config, args)
@@ -211,65 +228,82 @@ class UploadCache(BaseCache):
     def __init__(self, args=[]):
         BaseCache.__init__(self, args)
 
+    @staticmethod
+    def msys_scp_path_hack(config, path):
+        '''
+        MSYS scp doesn't understand Windows-style paths like C:/ for the src
+        argument. It tries to resolve `C:` as a network hostname. Convert C:/
+        to /C/ when running on Windows.
+        '''
+        if config.platform == Platform.WINDOWS:
+            return to_unixpath(path)
+        return path
+
     def upload_dep(self, config, args, deps):
-      sha = self.get_git_sha(args)
-      for dep in deps:
-        if dep['commit'] == sha:
-          m.message('Cache already uploaded for this commit.')
-          return
+        sha = self.get_git_sha(args)
+        for dep in deps:
+            if dep['commit'] == sha:
+                m.message('Cache already uploaded for this commit.')
+                return
 
-      tmpdir = tempfile.mkdtemp()
-      private_key = os.getenv('CERBERO_PRIVATE_SSH_KEY');
-      private_key_path = os.path.join(tmpdir, 'id_rsa')
+        tmpdir = tempfile.mkdtemp()
+        private_key = os.getenv('CERBERO_PRIVATE_SSH_KEY');
+        private_key_path = os.path.join(tmpdir, 'id_rsa')
 
-      deps_filename = self.get_deps_filename(config)
-      log_filename = self.get_log_filename(config)
-      if not os.path.exists(deps_filename) or not os.path.exists(log_filename):
-          raise FatalError(_('gen-cache must be run before running upload-cache.'))
+        deps_filename = self.get_deps_filename(config)
+        log_filename = self.get_log_filename(config)
+        if not os.path.exists(deps_filename) or not os.path.exists(log_filename):
+            raise FatalError(_('gen-cache must be run before running upload-cache.'))
 
-      try:
-          # Setup tempory private key from env
-          ssh_opt = ['-o', 'StrictHostKeyChecking=no']
-          if private_key:
-              with os.fdopen(os.open(private_key_path, os.O_WRONLY | os.O_CREAT, 0o600), 'w') as f:
-                  f.write(private_key)
-                  f.write("\n")
-                  f.close()
-              ssh_opt += ['-i', private_key_path]
-          ssh_cmd = ['ssh'] + ssh_opt + [self.ssh_address]
-          scp_cmd = ['scp'] + ssh_opt
+        try:
+            # Setup tempory private key from env
+            ssh_opt = ['-o', 'StrictHostKeyChecking=no']
+            if private_key:
+                with os.fdopen(os.open(private_key_path, os.O_WRONLY | os.O_CREAT, 0o600), 'w') as f:
+                    f.write(private_key)
+                    f.write("\n")
+                    f.close()
+                ssh_opt += ['-i', private_key_path]
+            ssh_cmd = ['ssh'] + ssh_opt + [self.ssh_address]
+            scp_cmd = ['scp'] + ssh_opt
 
-          # Ensure directory sturcture is in place
-          branch = args.branch
-          distro, arch = self.get_distro_and_arch(config)
-          base_dir = os.path.join(branch, distro, arch)
-          shell.new_call(ssh_cmd + ['mkdir -p %s' % base_dir ])
+            # Ensure directory sturcture is in place
+            branch = args.branch
+            distro, arch = self.get_distro_and_arch(config)
+            base_dir = os.path.join(branch, distro, arch)
+            shell.new_call(ssh_cmd + ['mkdir -p %s' % base_dir ], verbose=True)
 
-          # Upload the deps files first
-          remote_deps_filename = os.path.join(base_dir, '%s-%s' % (sha, self.deps_filename))
-          shell.new_call(scp_cmd + [deps_filename, '%s:%s' % (self.ssh_address, remote_deps_filename)])
+            # Upload the deps files first
+            remote_deps_filename = os.path.join(base_dir, '%s-%s' % (sha, self.deps_filename))
+            shell.new_call(scp_cmd + [self.msys_scp_path_hack(config, deps_filename),
+                                      '%s:%s' % (self.ssh_address, remote_deps_filename)],
+                           verbose=True)
 
-          # Upload the new log
-          remote_tmp_log_filename = os.path.join(base_dir, '%s-%s' % (sha, self.log_filename))
-          shell.new_call(scp_cmd + [log_filename,
-              '%s:%s' % (self.ssh_address, remote_tmp_log_filename)])
+            # Upload the new log
+            remote_tmp_log_filename = os.path.join(base_dir, '%s-%s' % (sha, self.log_filename))
+            shell.new_call(scp_cmd + [self.msys_scp_path_hack(config, log_filename),
+                                      '%s:%s' % (self.ssh_address, remote_tmp_log_filename)],
+                           verbose=True)
 
-          # Override the new log in a way that we reduce the risk of corrupted
-          # fetch.
-          remote_log_filename = os.path.join(base_dir, self.log_filename)
-          shell.new_call(ssh_cmd + ['mv', '-f', remote_tmp_log_filename, remote_log_filename])
+            # Override the new log in a way that we reduce the risk of corrupted
+            # fetch.
+            remote_log_filename = os.path.join(base_dir, self.log_filename)
+            shell.new_call(ssh_cmd + ['mv', '-f', remote_tmp_log_filename, remote_log_filename],
+                           verbose=True)
+            m.message('New deps cache uploaded and deps log updated')
 
-          # Now remove the obsoleted dep file if needed
-          for dep in deps[self.log_size - 1:]:
-              old_remote_deps_filename = os.path.join(base_dir, os.path.basename(dep['url']))
-              shell.new_call(ssh_cmd + ['rm', '-f', old_remote_deps_filename])
-      finally:
-          shutil.rmtree(tmpdir)
+            # Now remove the obsoleted dep file if needed
+            for dep in deps[self.log_size - 1:]:
+                old_remote_deps_filename = os.path.join(base_dir, os.path.basename(dep['url']))
+                shell.new_call(ssh_cmd + ['rm', '-f', old_remote_deps_filename], verbose=True)
+        finally:
+            shutil.rmtree(tmpdir)
 
     def run(self, config, args):
         BaseCache.run(self, config, args)
         deps = self.get_deps(config, args)
         self.upload_dep(config, args, deps)
+        m.message('All done!')
 
 register_command(FetchCache)
 register_command(GenCache)

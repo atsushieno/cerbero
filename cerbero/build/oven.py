@@ -334,16 +334,28 @@ class Oven (object):
             job_allocation[BuildSteps.COMPILE[1]] = 2
         if self.jobs > 5:
             job_allocation[BuildSteps.COMPILE[1]] = 3
+            if self.config.platform == Platform.WINDOWS:
+                # On Windows, the majority of our recipes use GNU make or
+                # nmake, both of which are run with -j1, so we need to increase
+                # the job allocation since we can run more of them in parallel
+                job_allocation[BuildSteps.COMPILE[1]] = self.jobs // 2
         if self.jobs > 7:
             install_queue = asyncio.PriorityQueue(loop=loop)
             for step in install_steps:
                 queues[step] = install_queue
             job_allocation[BuildSteps.INSTALL[1]] = 1
         if self.jobs > 8:
-            job_allocation[BuildSteps.EXTRACT[1]] = 1
-            queues[BuildSteps.EXTRACT[1]] = asyncio.PriorityQueue(loop=loop)
+            # Extract on windows is slow because we use tarfile for it, so we
+            # can parallelize it. On other platforms, decompression is pretty
+            # fast, so we shouldn't parallelize.
+            if self.config.platform != Platform.WINDOWS:
+                job_allocation[BuildSteps.EXTRACT[1]] = 1
+                queues[BuildSteps.EXTRACT[1]] = asyncio.PriorityQueue(loop=loop)
         if self.jobs > 9:
-            job_allocation[BuildSteps.FETCH[1]] = 1
+            # Two jobs is the same allocation as fetch-package/bootstrap, which
+            # is a good idea to avoid getting bottlenecked if one of the
+            # download mirrors is slow.
+            job_allocation[BuildSteps.FETCH[1]] = 2
             queues[BuildSteps.FETCH[1]] = asyncio.PriorityQueue(loop=loop)
 
         # async locks used to synchronize step execution

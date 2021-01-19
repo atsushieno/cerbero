@@ -4,13 +4,12 @@
 class Recipe(custom.GStreamer):
     name = 'gst-plugins-base-1.0'
     btype = BuildType.MESON
-    tarball_checksum = '4093aa7b51e28fb24dfd603893fead8d1b7782f088b05ed0f22a21ef176fb5ae'
+    tarball_checksum = '762abdd1a950809a1cea62fff7f86b5f7d6bd5f6841e3e585c700b823cdb7897'
     meson_options = {# enabled plugins
                      'gl': 'enabled',
                      'gl-graphene': 'enabled',
                      'gl-png': 'enabled',
                      'gl-jpeg': 'enabled',
-                     'libvisual': 'enabled',
                      'ogg': 'enabled',
                      'opus': 'enabled',
                      'pango': 'enabled',
@@ -19,7 +18,7 @@ class Recipe(custom.GStreamer):
                      # disabled plugins
                      'tremor': 'disabled'}
     deps = ['glib', 'gstreamer-1.0', 'libogg', 'pango', 'libtheora',
-            'libvisual', 'libvorbis', 'zlib', 'orc', 'opus', 'graphene',
+            'libvorbis', 'zlib', 'orc', 'opus', 'graphene',
             'libjpeg-turbo', 'libpng']
     platform_deps = {Platform.ANDROID: [ 'tremor' ], Platform.IOS: [ 'tremor' ] }
     use_system_libs = True
@@ -105,14 +104,6 @@ class Recipe(custom.GStreamer):
              'lib/gstreamer-1.0/libgsttheora.a', 'lib/gstreamer-1.0/libgsttheora.la',
              'lib/gstreamer-1.0/libgstvorbis.a', 'lib/gstreamer-1.0/libgstvorbis.la',
              'lib/gstreamer-1.0/libgstopus.a', 'lib/gstreamer-1.0/libgstopus.la',
-    ]
-
-    files_plugins_vis = [
-             'lib/gstreamer-1.0/libgstlibvisual%(mext)s',
-    ]
-
-    files_plugins_vis_devel = [
-             'lib/gstreamer-1.0/libgstlibvisual.a', 'lib/gstreamer-1.0/libgstlibvisual.la',
     ]
 
     files_plugins_devel = [
@@ -201,7 +192,7 @@ class Recipe(custom.GStreamer):
             self.append_env('CFLAGS', '-DGSTREAMER_GLIB_COCOA_NSAPPLICATION=1')
             self.append_env('OBJCFLAGS', '-DGSTREAMER_GLIB_COCOA_NSAPPLICATION=1')
 
-        self.enable_plugin('cdparanoia', 'sys', 'cdparanoia')
+        self.enable_plugin('cdparanoia', 'sys', 'cdparanoia', dep='cdparanoia')
         self.enable_plugin('ximagesink', 'sys', 'x11')
         self.enable_plugin('xvimagesink', 'sys', 'x11', option='xvideo')
         self.enable_plugin('alsa', 'sys', 'alsa')
@@ -210,14 +201,20 @@ class Recipe(custom.GStreamer):
             self.meson_options['tremor'] = 'enabled'
 
         if self.using_uwp():
-            # All these except libvisual can be ported to Meson/UWP
-            self.disable_plugin('opengl', 'sys', 'gl', library_name='gl')
-            self.disable_plugin('libvisual', 'vis', dep='libvisual')
+            # All these can be ported to Meson/UWP
             self.disable_plugin('ogg', 'codecs', dep='libogg')
-            self.disable_plugin('opus', 'codecs', dep='opus')
             self.disable_plugin('pango', 'core', dep='pango')
             self.disable_plugin('theora', 'codecs', dep='libtheora')
             self.disable_plugin('vorbis', 'codecs', dep='libvorbis')
+            if self.config.target_arch in (Architecture.ARM64, Architecture.X86_64, Architecture.X86):
+                self.deps.append('angle-uwp')
+                # To avoid complicating winrt vs win32 detection,
+                # explicitly select api/platform/winsys
+                self.meson_options['gl_api'] = 'gles2'
+                self.meson_options['gl_platform'] = 'egl'
+                self.meson_options['gl_winsys'] = 'winrt'
+            else:
+                self.disable_plugin('opengl', 'sys', 'gl', library_name='gl')
             self.meson_options['gl-graphene'] = 'disabled'
             self.meson_options['gl-png'] = 'disabled'
             self.meson_options['gl-jpeg'] = 'disabled'

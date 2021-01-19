@@ -17,9 +17,10 @@
 # Boston, MA 02111-1307, USA.
 
 import asyncio
+import argparse
 
 from cerbero.commands import Command, register_command
-from cerbero.utils import N_, _, ArgparseArgument, determine_num_of_cpus, run_until_complete
+from cerbero.utils import N_, _, ArgparseArgument, determine_num_of_cpus, run_until_complete, StoreBool
 from cerbero.utils import messages as m
 from cerbero.bootstrap.bootstrapper import Bootstrapper
 
@@ -33,9 +34,18 @@ class Bootstrap(Command):
     def __init__(self):
         args = [
             ArgparseArgument('--build-tools-only', action='store_true',
-                default=False, help=_('only bootstrap the build tools')),
+                default=False, help=argparse.SUPPRESS),
             ArgparseArgument('--system-only', action='store_true',
-                default=False, help=('only boostrap the system')),
+                default=False, help=argparse.SUPPRESS),
+            ArgparseArgument('--system', action=StoreBool,
+                default=True, nargs='?', choices=('yes', 'no'),
+                help='Setup the system for building, such as by installing system packages'),
+            ArgparseArgument('--toolchains', action=StoreBool,
+                default=True, nargs='?', choices=('yes', 'no'),
+                help='Setup any toolchains needed by the target platform'),
+            ArgparseArgument('--build-tools', action=StoreBool,
+                default=True, nargs='?', choices=('yes', 'no'),
+                help='Compile the build tools needed while building'),
             ArgparseArgument('--offline', action='store_true',
                 default=False, help=_('Use only the source cache, no network')),
             ArgparseArgument('-y', '--assume-yes', action='store_true',
@@ -46,8 +56,17 @@ class Bootstrap(Command):
         Command.__init__(self, args)
 
     def run(self, config, args):
-        bootstrappers = Bootstrapper(config, args.build_tools_only,
-                args.offline, args.assume_yes, args.system_only)
+        if args.build_tools_only:
+            # --build-tools-only meant '--system=no --toolchains=no --build-tools=yes'
+            args.toolchains = False
+            args.system = False
+            m.deprecation('Replace --build-tools-only with --system=no --toolchains=no')
+        if args.system_only:
+            # --system-only meant '--system=yes --toolchains=yes --build-tools=no'
+            args.build_tools = False
+            m.deprecation('Replace --system-only with --build-tools=no')
+        bootstrappers = Bootstrapper(config, args.system, args.toolchains,
+                args.build_tools, args.offline, args.assume_yes)
         tasks = []
         async def bootstrap_fetch_extract(bs):
             await bs.fetch()
@@ -67,14 +86,24 @@ class FetchBootstrap(Command):
     def __init__(self):
         args = [
             ArgparseArgument('--build-tools-only', action='store_true',
-                default=False, help=_('only fetch the build tools')),
+                default=False, help=argparse.SUPPRESS),
+            ArgparseArgument('--toolchains', action=StoreBool,
+                default=True, nargs='?', choices=('yes', 'no'),
+                help='Setup any toolchains needed by the target platform'),
+            ArgparseArgument('--build-tools', action=StoreBool,
+                default=True, nargs='?', choices=('yes', 'no'),
+                help='Compile the build tools needed while building'),
             ArgparseArgument('--jobs', '-j', action='store', nargs='?', type=int,
                     const=NUMBER_OF_JOBS_IF_USED, default=NUMBER_OF_JOBS_IF_UNUSED, help=_('number of async jobs'))]
         Command.__init__(self, args)
 
     def run(self, config, args):
-        bootstrappers = Bootstrapper(config, args.build_tools_only,
-                offline=False, assume_yes=False, system_only=False)
+        if args.build_tools_only:
+            # --build-tools-only meant '--toolchains=no --build-tools=yes'
+            args.toolchains = False
+            m.deprecation('Replace --build-tools-only with --toolchains=no')
+        bootstrappers = Bootstrapper(config, False, args.toolchains,
+                args.build_tools, offline=False, assume_yes=False)
         tasks = []
         for bootstrapper in bootstrappers:
             bootstrapper.fetch_recipes(args.jobs)

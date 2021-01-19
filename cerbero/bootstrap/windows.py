@@ -22,7 +22,8 @@ import shutil
 from pathlib import Path
 
 from cerbero.bootstrap import BootstrapperBase
-from cerbero.bootstrap.bootstrapper import register_bootstrapper
+from cerbero.bootstrap.bootstrapper import register_system_bootstrapper
+from cerbero.bootstrap.bootstrapper import register_toolchain_bootstrapper
 from cerbero.config import Architecture, Distro, Platform
 from cerbero.errors import ConfigurationError
 from cerbero.utils import shell, _, fix_winpath, to_unixpath, git
@@ -48,15 +49,56 @@ KHRONOS_WGL_TPL = 'https://raw.githubusercontent.com/KhronosGroup/OpenGL-Registr
 WGL_CHECKSUM = '8961c809d180e3590fca32053341fe3a83394edcb936f7699f0045feadb16115'
 
 # Extra binary dependencies
-GNOME_FTP = 'https://download.gnome.org/binaries/win32/'
-WINDOWS_BIN_DEPS = [
-    ('intltool/0.40/intltool_0.40.4-1_win32.zip',
-     '7180a780cee26c5544c06a73513c735b7c8c107db970b40eb7486ea6c936cb33')]
+INTLTOOL_URL = 'https://download.gnome.org/binaries/win32/intltool/0.40/intltool_0.40.4-1_win32.zip'
+INTLTOOL_CHECKSUM = '7180a780cee26c5544c06a73513c735b7c8c107db970b40eb7486ea6c936cb33'
+XZ_URL = 'https://tukaani.org/xz/xz-5.2.5-windows.zip'
+XZ_CHECKSUM = 'd83b82ca75dfab39a13dda364367b34970c781a9df4d41264db922ac3a8f622d'
 
 # MSYS packages needed
 MINGWGET_DEPS = ['msys-flex', 'msys-bison', 'msys-perl']
 
-class WindowsBootstrapper(BootstrapperBase):
+class MSYSBootstrapper(BootstrapperBase):
+    '''
+    Bootstrapper for native windows builds on top of MSYS
+    Installs the necessary MSYS packages and fixups
+    '''
+
+    def __init__(self, config, offline, assume_yes):
+        super().__init__(config, offline)
+
+    def start(self, jobs=0):
+        self.install_mingwget_deps() # FIXME: This uses the network
+        self.fix_mingw_unused()
+
+    def install_mingwget_deps(self):
+        for dep in MINGWGET_DEPS:
+            shell.new_call(['mingw-get', 'install', dep])
+
+    def fix_mingw_unused(self):
+        mingw_get_exe = shutil.which('mingw-get')
+        if not mingw_get_exe:
+            m.warning('mingw-get not found, are you not using an MSYS shell?')
+            return
+        msys_mingw_bindir = Path(mingw_get_exe).parent
+        # Fixes checks in configure, where cpp -v is called
+        # to get some include dirs (which doesn't looks like a good idea).
+        # If we only have the host-prefixed cpp, this problem is gone.
+        if (msys_mingw_bindir / 'cpp.exe').is_file():
+            os.replace(msys_mingw_bindir / 'cpp.exe',
+                       msys_mingw_bindir / 'cpp.exe.bck')
+        # MSYS's link.exe (for symlinking) overrides MSVC's link.exe (for
+        # C linking) in new shells, so rename it. No one uses `link` for
+        # symlinks anyway.
+        msys_link_exe = shutil.which('link')
+        if not msys_link_exe:
+            return
+        msys_link_exe = Path(msys_link_exe)
+        msys_link_bindir = msys_link_exe.parent
+        if msys_link_exe.is_file() and 'msys/1.0/bin/link' in msys_link_exe.as_posix():
+            os.replace(msys_link_exe, msys_link_bindir / 'link.exe.bck')
+
+
+class MinGWBootstrapper(BootstrapperBase):
     '''
     Bootstrapper for windows builds.
     Installs the mingw-w64 compiler toolchain and headers for Directx
@@ -92,10 +134,14 @@ class WindowsBootstrapper(BootstrapperBase):
             # Newer versions of binary deps such as intltool. Must be extracted
             # after the MinGW toolchain from above is extracted so that it
             # replaces the older files.
-            for dep, checksum in WINDOWS_BIN_DEPS:
-                url = GNOME_FTP + dep
-                self.fetch_urls.append((url, checksum))
-                self.extract_steps.append((url, True, self.prefix))
+            self.fetch_urls.append((INTLTOOL_URL, INTLTOOL_CHECKSUM))
+            self.extract_steps.append((INTLTOOL_URL, True, self.prefix))
+            # Newer version of xz that supports multithreaded compression. Need
+            # to extract to a temporary directory, then overwrite the existing
+            # lzma/xz binaries.
+            self.xz_tmp_prefix = tempfile.TemporaryDirectory() # cleaned up on exit
+            self.fetch_urls.append((XZ_URL, XZ_CHECKSUM))
+            self.extract_steps.append((XZ_URL, True, self.xz_tmp_prefix.name))
 
     def start(self, jobs=0):
         if not git.check_line_endings(self.config.platform):
@@ -107,9 +153,7 @@ class WindowsBootstrapper(BootstrapperBase):
             self.fix_mingw()
             self.fix_openssl_mingw_perl()
             self.fix_bin_deps()
-            # FIXME: This uses the network
-            self.install_mingwget_deps()
-            self.fix_mingw_unused()
+            self.install_xz()
 
     def check_dirs(self):
         if not os.path.exists(self.perl_prefix):
@@ -150,9 +194,14 @@ class WindowsBootstrapper(BootstrapperBase):
             shutil.move(os.path.join(perldir, d), self.perl_prefix)
         os.rmdir(perldir)
 
-    def install_mingwget_deps(self):
-        for dep in MINGWGET_DEPS:
-            shell.new_call(['mingw-get', 'install', dep])
+    def install_xz(self):
+        msys_xz = shutil.which('xz')
+        if not msys_xz:
+            m.warning('xz not found, are you not using an MSYS shell?')
+        msys_bindir = os.path.dirname(msys_xz)
+        src = os.path.join(self.xz_tmp_prefix.name, 'bin_x86-64')
+        for b in ('xz.exe', 'xzdec.exe', 'lzmadec.exe', 'lzmainfo.exe'):
+            shutil.copy2(os.path.join(src, b), os.path.join(msys_bindir, b))
 
     def fix_bin_deps(self):
         # replace /opt/perl/bin/perl in intltool
@@ -161,29 +210,7 @@ class WindowsBootstrapper(BootstrapperBase):
             shell.replace(os.path.join(self.prefix, f),
                           {'/opt/perl/bin/perl': '/bin/perl'})
 
-    def fix_mingw_unused(self):
-        mingw_get_exe = shutil.which('mingw-get')
-        if not mingw_get_exe:
-            m.warning('mingw-get not found, are you not using an MSYS shell?')
-            return
-        msys_mingw_bindir = Path(mingw_get_exe).parent
-        # Fixes checks in configure, where cpp -v is called
-        # to get some include dirs (which doesn't looks like a good idea).
-        # If we only have the host-prefixed cpp, this problem is gone.
-        if (msys_mingw_bindir / 'cpp.exe').is_file():
-            os.replace(msys_mingw_bindir / 'cpp.exe',
-                       msys_mingw_bindir / 'cpp.exe.bck')
-        # MSYS's link.exe (for symlinking) overrides MSVC's link.exe (for
-        # C linking) in new shells, so rename it. No one uses `link` for
-        # symlinks anyway.
-        msys_link_exe = shutil.which('link')
-        if not msys_link_exe:
-            return
-        msys_link_exe = Path(msys_link_exe)
-        msys_link_bindir = msys_link_exe.parent
-        if msys_link_exe.is_file() and 'msys/1.0/bin/link' in msys_link_exe.as_posix():
-            os.replace(msys_link_exe, msys_link_bindir / 'link.exe.bck')
-
 
 def register_all():
-    register_bootstrapper(Distro.WINDOWS, WindowsBootstrapper)
+    register_toolchain_bootstrapper(Distro.WINDOWS, MinGWBootstrapper)
+    register_system_bootstrapper(Distro.WINDOWS, MSYSBootstrapper)

@@ -289,18 +289,20 @@ class CookBook (object):
         @return: the closest recipe name
         @rtype: str
         '''
+        # If there's an exact match, just return it
+        if name in self.recipes:
+            return name
+
         recipe_name = ''
         for r in self.recipes:
-          if name == r:
-            return name
-          if name in r:
-            if recipe_name:
-              m.message("Name '%s' matches two or more recipes: [%s, %s]" % (name, r, recipe_name))
-              return ''
-            else:
-              recipe_name = r
-        if recipe_name and name != recipe_name:
-          m.message("Found a recipe name %s for name %s " % (recipe_name, name))
+            if name in r:
+                if recipe_name:
+                    m.message("Name '%s' matches two or more recipes: [%s, %s]" % (name, r, recipe_name))
+                    return ''
+                recipe_name = r
+
+        if recipe_name:
+            m.message("Found a recipe %s matching name %s" % (recipe_name, name))
 
         return recipe_name
 
@@ -314,11 +316,15 @@ class CookBook (object):
             return USER_COOKBOOK_FILE
 
     def _restore_cache(self):
+        self.status = {}
+        cachefile = self._cache_file(self.get_config())
+        if not os.path.isfile(cachefile):
+            # From-scratch build
+            return
         try:
-            with open(self._cache_file(self.get_config()), 'rb') as f:
+            with open(cachefile, 'rb') as f:
                 self.status = pickle.load(f)
         except Exception:
-            self.status = {}
             m.warning(_("Could not recover status"))
 
     def save(self):
