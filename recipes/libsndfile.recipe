@@ -1,0 +1,20 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+from cerbero.utils import shell
+
+
+class Recipe(recipe.Recipe):
+    name = 'libsndfile'
+    version = '1.0.28'
+    stype = SourceType.TARBALL
+    url = 'https://github.com/erikd/libsndfile/archive/1.0.28.tar.gz'
+    tarball_checksum = '89abe87316bc9afac9e5b34b137a399286cbcd6affad409b110596e3b749c897'
+    licenses = [{License.LGPLv2_1Plus: ['COPYING']}]
+    deps = ['libogg', 'libvorbis', 'flac']
+    config_sh = 'rm ltmain.sh && sh autogen.sh'
+    patches = [
+              ]
+    config_sh = './autogen.sh && ./configure --enable-external-libs'
+    autoreconf = True
+
+    files_libs = ['libsndfile']
+    files_devel = ['include/sndfile', 'lib/pkgconfig/sndfile.pc']
